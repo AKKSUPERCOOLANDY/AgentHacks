@@ -57,7 +57,7 @@ class DocumentAnalysisSystem:
             self.gemini_client = GeminiClient()
             
             # Initialize EMPTY memory tree with clean database
-            db_name = f"investigation_{self.session_id}.db"
+            db_name = f"db/investigation_{self.session_id}.db"
             logger.info(f"🌳 Creating empty memory tree (database: {db_name})...")
             self.memory_tree = MemoryTree(db_name)
             logger.info("Memory tree initialized (empty - will be built from documents)")
@@ -75,7 +75,7 @@ class DocumentAnalysisSystem:
                 return False
             
             # Initialize task queue with clean database
-            queue_db_name = f"tasks_{self.session_id}.db"
+            queue_db_name = f"db/tasks_{self.session_id}.db"
             logger.info(f"📋 Setting up task queue (database: {queue_db_name})...")
             self.task_queue = TaskQueue(queue_db_name)
             

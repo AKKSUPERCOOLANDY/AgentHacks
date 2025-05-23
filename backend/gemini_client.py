@@ -84,7 +84,7 @@ if __name__ == "__main__":
         response = client.generate_content(
             model="gemini-2.0-flash", 
             contents="Explain how AI works in a few words"
-        )
+)
         print(response)
     except Exception as e:
         print(f"Error: {e}")

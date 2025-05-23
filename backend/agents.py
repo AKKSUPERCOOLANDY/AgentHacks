@@ -919,7 +919,7 @@ if __name__ == "__main__":
         # Initialize components
         client = GeminiClient()
         tree = create_detective_case_tree("Test Investigation")
-        queue = TaskQueue("agent_test.db")
+        queue = TaskQueue("db/agent_test.db")
         
         # Initialize agent system
         system = AgentSystem(client, tree, queue)

@@ -124,7 +124,7 @@ class Task:
 class TaskQueue:
     """Dynamic task queue with dependency management"""
     
-    def __init__(self, db_path: str = "task_queue.db"):
+    def __init__(self, db_path: str = "db/task_queue.db"):
         self.tasks: Dict[str, Task] = {}
         self.execution_order: List[str] = []
         self.completed_tasks: List[str] = []
@@ -496,7 +496,7 @@ def create_synthesis_task(description: str, instructions: str, dependencies: Lis
 # Example usage and testing
 if __name__ == "__main__":
     # Create a test task queue
-    queue = TaskQueue("test_queue.db")
+    queue = TaskQueue("db/test_queue.db")
     
     # Create some test tasks
     task1 = create_investigation_task(

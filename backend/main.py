@@ -60,7 +60,7 @@ class SystemController:
             
             # Initialize task queue
             logger.info("📋 Setting up task queue...")
-            self.task_queue = TaskQueue("main_system.db")
+            self.task_queue = TaskQueue("db/main_system.db")
             
             # Initialize agent system
             logger.info("🤖 Initializing agent system...")
@@ -144,7 +144,7 @@ async def test_planner_agent():
     # Initialize components
     client = GeminiClient()
     tree = create_detective_case_tree("Planner Test")
-    queue = TaskQueue("planner_test.db")
+    queue = TaskQueue("db/planner_test.db")
     
     # Create planner agent
     from agents import PlannerAgent

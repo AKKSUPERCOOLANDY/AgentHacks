@@ -60,7 +60,7 @@ class MemoryNode:
 class MemoryTree:
     """Tree-based memory structure for AI agents"""
     
-    def __init__(self, db_path: str = "memory_tree.db"):
+    def __init__(self, db_path: str = "db/memory_tree.db"):
         self.nodes: Dict[str, MemoryNode] = {}
         self.root_id: Optional[str] = None
         self.db_path = db_path
@@ -482,7 +482,7 @@ def create_detective_case_tree(case_name: str) -> MemoryTree:
 # Example usage and testing
 if __name__ == "__main__":
     # Create a test tree
-    tree = MemoryTree("test_tree.db")
+    tree = MemoryTree("db/test_tree.db")
     
     # Add root node
     root = create_root_node("Test Investigation", "Testing the memory tree system")
