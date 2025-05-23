@@ -369,32 +369,23 @@ class TaskQueue:
         """Get all failed tasks"""
         return [task for task in self.tasks.values() if task.status == TaskStatus.FAILED]
     
-    def get_queue_statistics(self) -> Dict[str, Any]:
+    def get_queue_statistics(self) -> Dict[str, int]:
         """Get statistics about the task queue"""
-        total_tasks = len(self.tasks)
-        pending_tasks = len(self.get_pending_tasks())
-        completed_tasks = len(self.get_completed_tasks())
-        failed_tasks = len(self.get_failed_tasks())
-        in_progress_tasks = len([t for t in self.tasks.values() if t.status == TaskStatus.IN_PROGRESS])
-        
-        # Calculate average completion time
-        completed = self.get_completed_tasks()
-        avg_duration = None
-        if completed:
-            durations = [t.actual_duration for t in completed if t.actual_duration]
-            if durations:
-                avg_duration = sum(durations) / len(durations)
-        
-        return {
-            'total_tasks': total_tasks,
-            'pending_tasks': pending_tasks,
-            'completed_tasks': completed_tasks,
-            'failed_tasks': failed_tasks,
-            'in_progress_tasks': in_progress_tasks,
-            'completion_rate': completed_tasks / total_tasks if total_tasks > 0 else 0,
-            'average_duration_minutes': avg_duration,
-            'available_tasks': len(self._get_available_tasks())
+        stats = {
+            'pending_tasks': len([t for t in self.tasks.values() if t.status == TaskStatus.PENDING]),
+            'in_progress_tasks': len([t for t in self.tasks.values() if t.status == TaskStatus.IN_PROGRESS]),
+            'completed_tasks': len([t for t in self.tasks.values() if t.status == TaskStatus.COMPLETED]),
+            'failed_tasks': len([t for t in self.tasks.values() if t.status == TaskStatus.FAILED]),
+            'total_tasks': len(self.tasks)
         }
+        return stats
+    
+    def get_recent_completed_tasks(self, limit: int = 10) -> List[Task]:
+        """Get the most recently completed tasks"""
+        completed_tasks = [t for t in self.tasks.values() if t.status in [TaskStatus.COMPLETED, TaskStatus.FAILED]]
+        # Sort by updated_at (most recent first)
+        completed_tasks.sort(key=lambda t: t.completed_at, reverse=True)
+        return completed_tasks[:limit]
     
     def export_queue_data(self) -> Dict[str, Any]:
         """Export queue data for visualization or analysis"""

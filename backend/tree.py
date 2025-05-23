@@ -226,30 +226,77 @@ class MemoryTree:
         
         return matching_nodes
     
-    def get_tree_statistics(self) -> Dict[str, int]:
-        """Get statistics about the tree"""
+    def get_tree_statistics(self) -> Dict[str, Any]:
+        """Get comprehensive tree statistics"""
         stats = {
             'total_nodes': len(self.nodes),
-            'leaf_nodes': len(self.get_leaves()),
+            'root_children': len([n for n in self.nodes.values() if n.parent_id is None]),
             'max_depth': self._calculate_max_depth(),
-            'pending_nodes': len([n for n in self.nodes.values() if n.status == NodeStatus.PENDING]),
-            'completed_nodes': len([n for n in self.nodes.values() if n.status == NodeStatus.COMPLETED]),
-            'failed_nodes': len([n for n in self.nodes.values() if n.status == NodeStatus.FAILED])
+            'nodes_by_status': self._count_nodes_by_status(),
+            'average_children': self._calculate_average_children(),
+            'leaf_nodes': len([n for n in self.nodes.values() if not self._get_children(n.id)])
         }
         return stats
     
     def _calculate_max_depth(self) -> int:
-        """Calculate maximum depth of the tree"""
-        if not self.root_id:
+        """Calculate the maximum depth of the tree"""
+        if not self.nodes:
             return 0
         
-        def _get_depth(node_id: str) -> int:
-            node = self.nodes[node_id]
-            if not node.children_ids:
+        def get_depth(node_id: str, visited: set = None) -> int:
+            if visited is None:
+                visited = set()
+            
+            if node_id in visited:
+                return 0  # Avoid infinite loops
+            
+            visited.add(node_id)
+            node = self.nodes.get(node_id)
+            if not node:
+                return 0
+            
+            children = self._get_children(node_id)
+            if not children:
                 return 1
-            return 1 + max(_get_depth(child_id) for child_id in node.children_ids)
+            
+            max_child_depth = max(get_depth(child.id, visited.copy()) for child in children)
+            return 1 + max_child_depth
         
-        return _get_depth(self.root_id)
+        # Find root nodes and calculate depth from each
+        root_nodes = [n for n in self.nodes.values() if n.parent_id is None]
+        if not root_nodes:
+            return 1
+        
+        return max(get_depth(root.id) for root in root_nodes)
+    
+    def _count_nodes_by_status(self) -> Dict[str, int]:
+        """Count nodes by their status"""
+        status_counts = {}
+        for node in self.nodes.values():
+            status = node.status.value if hasattr(node.status, 'value') else str(node.status)
+            status_counts[status] = status_counts.get(status, 0) + 1
+        return status_counts
+    
+    def _calculate_average_children(self) -> float:
+        """Calculate average number of children per node"""
+        if not self.nodes:
+            return 0.0
+        
+        total_children = sum(len(self._get_children(node.id)) for node in self.nodes.values())
+        return total_children / len(self.nodes)
+    
+    def _get_children(self, node_id: str) -> List[MemoryNode]:
+        """Get all child nodes of a given node"""
+        if node_id not in self.nodes:
+            return []
+        
+        node = self.nodes[node_id]
+        children = []
+        for child_id in node.children_ids:
+            if child_id in self.nodes:
+                children.append(self.nodes[child_id])
+        
+        return children
     
     def export_visualization_data(self) -> Dict:
         """Export tree data for visualization"""
@@ -396,6 +443,12 @@ class MemoryTree:
             pass
         
         conn.close()
+
+    def get_recent_nodes(self, limit: int = 10) -> List[MemoryNode]:
+        """Get the most recently created nodes"""
+        # Sort nodes by creation time (using node ID as proxy since it's UUID-based)
+        sorted_nodes = sorted(self.nodes.values(), key=lambda n: n.created_at if hasattr(n, 'created_at') else n.id, reverse=True)
+        return sorted_nodes[:limit]
 
 
 # Utility functions for easy tree creation
