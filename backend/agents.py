@@ -103,9 +103,10 @@ class PlannerAgent(BaseAgent):
     def __init__(self, gemini_client: GeminiClient, memory_tree: MemoryTree, task_queue: TaskQueue):
         super().__init__("PlannerAgent", gemini_client, memory_tree)
         self.task_queue = task_queue
-        self.max_tasks_per_cycle = 3  # Limit task creation
-        self.max_total_tasks = 50     # Stop after 50 total tasks
+        self.max_tasks_per_cycle = 2  # Reduced from 3 for more focused analysis
+        self.max_total_tasks = 8     # Reduced from 10 for efficiency
         self.synthesis_guidance = None
+        self.conclusion_created = False  # Prevent multiple conclusions
         
     async def create_initial_plan(self, investigation_context: str) -> List[Task]:
         """Create initial investigation plan"""
@@ -129,12 +130,12 @@ class PlannerAgent(BaseAgent):
             
             Create analysis tasks that work with the available case file content ONLY.
             
-            TASK CREATION RULES:
+            🌳 STRATEGIC TASK CREATION FOR TREE BUILDING:
             - Maximum 5 initial tasks
-            - Focus on analyzing patterns in the existing case files
-            - Cross-reference information between documents
-            - Identify inconsistencies or gaps in the written evidence
-            - Draw logical conclusions from available text data
+            - Create tasks that build LOGICAL HIERARCHY (evidence → analysis → conclusion)
+            - Focus on specific evidence categories (forensic, suspects, timeline, motives)
+            - Each task should build upon or connect to other tasks
+            - Create depth not breadth (detailed analysis vs surface-level)
             - DO NOT create tasks asking for external information
             
             Example good tasks:
@@ -184,6 +185,17 @@ class PlannerAgent(BaseAgent):
     async def refine_plan(self, completed_task: Task, result: str, synthesis_guidance=None):
         """Refine plan based on completed task and synthesis guidance"""
         try:
+            # IMMEDIATE CHECK: If conclusion already exists, don't create more tasks
+            if self.conclusion_created:
+                logger.info("[PLANNER] 🛑 Conclusion already created - skipping plan refinement")
+                return
+                
+            # Check if conclusion node exists in memory tree
+            if self._conclusion_exists_in_tree():
+                logger.info("[PLANNER] 🛑 Conclusion node found in memory tree - stopping task generation")
+                self.conclusion_created = True
+                return
+            
             # Store synthesis guidance
             if synthesis_guidance:
                 self.synthesis_guidance = synthesis_guidance
@@ -192,17 +204,21 @@ class PlannerAgent(BaseAgent):
             queue_stats = self.task_queue.get_queue_statistics()
             total_tasks = queue_stats['completed_tasks'] + queue_stats['failed_tasks']
             
-            # SMART STOPPING CONDITIONS  
-            if total_tasks >= 10:  # Much lower limit
-                logger.info(f"[PLANNER] 🛑 Reached maximum tasks (10)")
-                await self._create_conclusion_task("Maximum task limit reached")
+            # ENHANCED STOPPING CONDITIONS  
+            if total_tasks >= self.max_total_tasks:
+                logger.info(f"[PLANNER] 🛑 Reached maximum tasks ({self.max_total_tasks})")
+                if not self.conclusion_created:
+                    await self._create_conclusion_task("Maximum task limit reached")
+                    self.conclusion_created = True
                 return
             
             # Check for repetitive task patterns (stop infinite loops)
-            recent_tasks = self.task_queue.get_recent_completed_tasks(10)
+            recent_tasks = self.task_queue.get_recent_completed_tasks(8)
             if self._detect_task_loops(recent_tasks):
                 logger.info("[PLANNER] 🔄 Detected repetitive task pattern - concluding investigation")
-                await self._create_conclusion_task("Repetitive investigation pattern detected")
+                if not self.conclusion_created:
+                    await self._create_conclusion_task("Repetitive investigation pattern detected")
+                    self.conclusion_created = True
                 return
             
             if self.synthesis_guidance:
@@ -211,13 +227,17 @@ class PlannerAgent(BaseAgent):
                 
                 if recommendation == 'CONCLUDE' or confidence >= 0.8:
                     logger.info(f"[PLANNER] 🎯 Synthesis recommends conclusion (confidence: {confidence:.2f})")
-                    await self._create_conclusion_task(f"High confidence reached: {confidence:.2f}")
+                    if not self.conclusion_created:
+                        await self._create_conclusion_task(f"High confidence reached: {confidence:.2f}")
+                        self.conclusion_created = True
                     return
                 
-                # Stop if we've done 8+ tasks with medium confidence and FOCUS recommendation
-                if total_tasks >= 8 and confidence >= 0.65 and recommendation == 'FOCUS':
+                # IMPROVED: Stop earlier with medium confidence and sufficient tasks
+                if total_tasks >= 6 and confidence >= 0.65 and recommendation == 'FOCUS':
                     logger.info(f"[PLANNER] 📋 Sufficient investigation completed ({total_tasks} tasks, confidence: {confidence:.2f})")
-                    await self._create_conclusion_task("Sufficient evidence gathered for conclusion")
+                    if not self.conclusion_created:
+                        await self._create_conclusion_task("Sufficient evidence gathered for conclusion")
+                        self.conclusion_created = True
                     return
                 
                 if recommendation == 'FOCUS':
@@ -226,40 +246,49 @@ class PlannerAgent(BaseAgent):
             
             tree_stats = self.memory_tree.get_tree_statistics()
             
+            # ENHANCED: Create deeper evidence chains instead of broad analysis
             refinement_prompt = f"""
-            You are the Planner Agent refining the investigation plan.
+            You are the Planner Agent refining the investigation plan with DEPTH-FOCUSED approach.
             
             COMPLETED TASK: {completed_task.description}
             RESULT: {result[:500]}...
             
             CURRENT STATE:
-            - Memory tree: {tree_stats['total_nodes']} nodes
+            - Memory tree: {tree_stats['total_nodes']} nodes, depth {tree_stats['max_depth']}
             - Total completed tasks: {total_tasks}
             
             SYNTHESIS GUIDANCE:
             {self.synthesis_guidance if self.synthesis_guidance else "No synthesis guidance available"}
             
-            CRITICAL REFINEMENT RULES:
-            - You are in a SIMULATION - you cannot access real databases or conduct real interviews
-            - If tasks keep requesting the same information (AFIS results, alibi verification), STOP creating them
-            - Maximum {self.max_tasks_per_cycle} new tasks per refinement
-            - Focus on ANALYSIS of existing evidence, not gathering new evidence
-            - If confidence > 0.65 and you have 8+ tasks, consider concluding
+            🌳 AGGRESSIVE DEPTH-FORCING REFINEMENT:
+            - FORCE DEEP HIERARCHY: Only create tasks that extend leaf nodes or shallow branches
+            - MANDATORY DEPTH EXTENSION: Every task MUST target a specific existing node for deepening
+            - ZERO BREADTH TOLERANCE: No new top-level categories, only sub-analysis of existing nodes
+            - DEPTH REQUIREMENT: Tasks must create at least 2-3 levels of sub-analysis
+            - Maximum {self.max_tasks_per_cycle} DEPTH-FOCUSED tasks per refinement
+            - AGGRESSIVE TARGETING: Identify the shallowest analysis nodes and force deeper exploration
+            
+            Aggressive Depth Strategy:
+            1. If confidence < 0.7: Force deep dive into weakest evidence branches (3+ levels)
+            2. If confidence 0.7-0.8: Create sub-sub-analysis that connects evidence chains deeply
+            3. If confidence > 0.8: Create nested conclusion hierarchies summarizing evidence trees
             
             Should you create new tasks? Consider:
-            1. Have we analyzed all available evidence thoroughly?
-            2. Are we repeating the same types of tasks?
-            3. Do we have enough to draw conclusions?
+            1. Do we have sufficient evidence depth on key points?
+            2. Are there critical logical gaps in the evidence chain?
+            3. Can we connect existing evidence more strongly?
             
             Respond in JSON format:
             {{
                 "should_continue": true/false,
                 "reasoning": "why continue or stop",
+                "evidence_focus": "what evidence needs strengthening",
                 "new_tasks": [
                     {{
-                        "description": "task description",
-                        "instructions": "detailed instructions", 
-                        "priority": "HIGH|MEDIUM|LOW"
+                        "description": "specific evidence task",
+                        "instructions": "detailed analysis instructions", 
+                        "priority": "HIGH|MEDIUM|LOW",
+                        "builds_on": "which existing node this extends"
                     }}
                 ]
             }}
@@ -271,15 +300,17 @@ class PlannerAgent(BaseAgent):
             if refinement_result:
                 should_continue = refinement_result.get('should_continue', True)
                 reasoning = refinement_result.get('reasoning', 'No reasoning provided')
+                evidence_focus = refinement_result.get('evidence_focus', 'General analysis')
                 
                 logger.info(f"[PLANNER] Refinement decision: {'CONTINUE' if should_continue else 'STOP'}")
+                logger.info(f"[PLANNER] Evidence focus: {evidence_focus}")
                 logger.info(f"[PLANNER] Reasoning: {reasoning}")
                 
                 if should_continue and 'new_tasks' in refinement_result:
                     new_tasks = refinement_result['new_tasks'][:self.max_tasks_per_cycle]
                     
-                    # Filter out repetitive tasks
-                    filtered_tasks = self._filter_repetitive_tasks(new_tasks)
+                    # Enhanced task filtering for depth over breadth
+                    filtered_tasks = self._filter_for_depth_and_quality(new_tasks)
                     
                     for task_data in filtered_tasks:
                         priority = getattr(TaskPriority, task_data.get('priority', 'MEDIUM'))
@@ -291,13 +322,17 @@ class PlannerAgent(BaseAgent):
                         self.task_queue.add_task(task)
                     
                     if filtered_tasks:
-                        logger.info(f"[PLANNER] Added {len(filtered_tasks)} new tasks")
+                        logger.info(f"[PLANNER] Added {len(filtered_tasks)} depth-focused tasks")
                     else:
-                        logger.info("[PLANNER] 🚫 All proposed tasks were repetitive - concluding")
-                        await self._create_conclusion_task("No new productive tasks identified")
+                        logger.info("[PLANNER] 🚫 All proposed tasks filtered - concluding")
+                        if not self.conclusion_created:
+                            await self._create_conclusion_task("No new productive tasks identified")
+                            self.conclusion_created = True
                 else:
                     logger.info("[PLANNER] 🏁 No new tasks - investigation complete")
-                    await self._create_conclusion_task("Investigation analysis complete")
+                    if not self.conclusion_created:
+                        await self._create_conclusion_task("Investigation analysis complete")
+                        self.conclusion_created = True
             
         except Exception as e:
             logger.error(f"[PLANNER] Error refining plan: {e}")
@@ -329,8 +364,28 @@ class PlannerAgent(BaseAgent):
         
         return False
 
-    def _filter_repetitive_tasks(self, new_tasks):
-        """Filter out tasks that are too similar to recent ones"""
+    def _conclusion_exists_in_tree(self) -> bool:
+        """Check if a conclusion node already exists in the memory tree"""
+        try:
+            if not self.memory_tree:
+                return False
+                
+            # Look for conclusion nodes in the tree (don't require root_id)
+            for node in self.memory_tree.nodes.values():
+                node_name = node.name.upper()
+                conclusion_keywords = ['FINAL CONCLUSION', 'INVESTIGATION CONCLUDED', 'SYNTHESIS FINAL', 'FINAL INVESTIGATION CONCLUSION']
+                if any(keyword in node_name for keyword in conclusion_keywords):
+                    logger.info(f"[PLANNER] 🎯 Found existing conclusion node: {node.name}")
+                    return True
+                    
+            return False
+            
+        except Exception as e:
+            logger.error(f"[PLANNER] Error checking for conclusion in tree: {e}")
+            return False
+
+    def _filter_for_depth_and_quality(self, new_tasks):
+        """AGGRESSIVE filtering for maximum depth, zero tolerance for shallow tasks"""
         recent_tasks = self.task_queue.get_recent_completed_tasks(5)
         recent_descriptions = [task.description.lower() for task in recent_tasks]
         
@@ -338,27 +393,72 @@ class PlannerAgent(BaseAgent):
         for task in new_tasks:
             desc = task['description'].lower()
             
-            # Check if this task is too similar to recent ones
+            # AGGRESSIVE filtering: zero tolerance for shallow tasks
             is_repetitive = False
-            for recent_desc in recent_descriptions:
-                if ('afis' in desc and 'afis' in recent_desc) or \
-                   ('alibi' in desc and 'alibi' in recent_desc) or \
-                   ('fingerprint' in desc and 'fingerprint' in recent_desc) or \
-                   ('verify' in desc and 'verify' in recent_desc):
-                    is_repetitive = True
-                    break
+            is_shallow = False
+            lacks_depth_target = False
             
-            if not is_repetitive:
+            # Check for repetition
+            for recent_desc in recent_descriptions:
+                if any(keyword in desc and keyword in recent_desc for keyword in 
+                      ['afis', 'alibi', 'fingerprint', 'verify', 'analyze', 'investigate']):
+                    similarity_score = len(set(desc.split()) & set(recent_desc.split())) / len(set(desc.split()) | set(recent_desc.split()))
+                    if similarity_score > 0.3:  # Lowered from 0.4 - be more strict
+                        is_repetitive = True
+                        break
+            
+            # AGGRESSIVE shallow detection - expanded list
+            shallow_indicators = [
+                'general', 'overall', 'broad', 'comprehensive', 'complete analysis',
+                'investigate', 'analyze', 'examine', 'review', 'assess', 'explore',
+                'determine', 'identify', 'find', 'check', 'look into'
+            ]
+            if any(indicator in desc for indicator in shallow_indicators):
+                is_shallow = True
+            
+            # Check if task targets specific existing nodes (depth requirement)
+            depth_requirement_indicators = [
+                'specific', 'detailed', 'sub-analysis', 'deeper', 'granular',
+                'cross-reference', 'correlate', 'connect', 'extend', 'build on'
+            ]
+            has_depth_target = any(indicator in desc for indicator in depth_requirement_indicators)
+            
+            # Check if task mentions building on existing analysis
+            builds_on_existing = 'builds_on' in task and task['builds_on']
+            
+            # AGGRESSIVE: Require both depth indicators AND specific targeting
+            if not is_repetitive and not is_shallow and (has_depth_target or builds_on_existing):
                 filtered.append(task)
             else:
-                logger.info(f"[PLANNER] 🚫 Filtered repetitive task: {task['description']}")
+                reason = "repetitive" if is_repetitive else "shallow/lacks depth target" if is_shallow else "no depth indicators"
+                logger.info(f"[PLANNER] 🚫 AGGRESSIVE filter: {reason} task: {task['description']}")
         
-        return filtered
+        # Additional aggressive filtering: prefer tasks that mention specific node types
+        depth_priority_filtered = []
+        for task in filtered:
+            desc = task['description'].lower()
+            # Prioritize tasks that mention specific evidence types or analysis areas
+            priority_indicators = [
+                'fingerprint analysis', 'fabric analysis', 'timeline correlation',
+                'motive analysis', 'appointment details', 'witness statement cross-reference'
+            ]
+            if any(indicator in desc for indicator in priority_indicators):
+                depth_priority_filtered.insert(0, task)  # Add to front
+            else:
+                depth_priority_filtered.append(task)
+        
+        return depth_priority_filtered[:self.max_tasks_per_cycle]  # Ensure we don't exceed limit
 
     async def _create_conclusion_task(self, reason):
         """Create and immediately execute a final conclusion task"""
         logger.info(f"[PLANNER] 🏁 Forcing immediate conclusion: {reason}")
         
+        # Check if conclusion task already exists in queue
+        if self.task_queue.has_conclusion_task():
+            logger.info("[PLANNER] 🛑 Conclusion task already exists in queue - skipping duplicate")
+            self.conclusion_created = True
+            return
+            
         # Create conclusion directly in memory instead of queueing
         conclusion_instructions = f"""
         The investigation is concluding due to: {reason}
@@ -405,6 +505,7 @@ class PlannerAgent(BaseAgent):
                 name="FINAL INVESTIGATION CONCLUSION",
                 description=conclusion_text
             )
+            conclusion_node.status = NodeStatus.COMPLETED
             
             if self.memory_tree.root_id:
                 self.memory_tree.add_node(conclusion_node, self.memory_tree.root_id)
@@ -441,52 +542,49 @@ class ExecutorAgent(BaseAgent):
         relevant_context = self._get_relevant_context(task)
         
         prompt = f"""
-        You are analyzing a CLOSED CASE FILE SIMULATION. You have access to 3 case documents that have already been loaded:
-        1. forensic_report.txt
-        2. police_report.txt  
-        3. witness_statement_robert.txt
+        You are the ExecutorAgent building a PROPER INVESTIGATION TREE HIERARCHY.
 
-        STRICT LIMITATIONS - YOU CANNOT:
-        - Access AFIS databases (they don't exist here)
-        - Contact external witnesses
-        - Get new forensic results
-        - Make phone calls or interviews
-        - Access any systems outside these 3 documents
-        - Verify alibis with external sources
-        - Get additional lab results
-
-        YOU CAN ONLY:
-        - Analyze text content from the 3 loaded case files
-        - Find patterns and connections in the existing evidence
-        - Cross-reference information between the documents
-        - Draw logical conclusions from available text data
-        - Identify inconsistencies in the statements/reports
-
-        SIMULATION TASK: {task.description}
+        TASK: {task.description}
         Instructions: {task.instructions}
         Priority: {task.priority.name}
         
-        Available Case File Data:
+        INVESTIGATION CONTEXT:
         {relevant_context}
         
-        Your job is to analyze the text content above and draw investigative conclusions.
-        Focus on what you can determine from the written evidence, not what you wish you could access.
+        🌳 AGGRESSIVE DEPTH-FIRST TREE BUILDING:
+        1. **FORCE DEEP HIERARCHY**: NEVER attach to root unless absolutely no other option exists
+        2. **USE EXACT NODE IDs**: When specifying parent_node_id, use the exact ID from the tree context above (first 8 chars work)
+        3. **CREATE DEEP CHAINS**: Evidence → Sub-Evidence → Analysis → Sub-Analysis → Conclusions
+        4. **MANDATORY DEPTH**: Every node MUST extend an existing analysis, never create standalone branches
+        
+        🎯 AGGRESSIVE HIERARCHY STRATEGY:
+        - Evidence nodes → MUST have detailed sub-analysis children (2-3 levels deep)
+        - Suspect nodes → MUST have specific motive/opportunity/timeline children  
+        - Timeline nodes → MUST have granular time-point analysis children
+        - Analysis nodes → MUST have detailed findings, cross-references, or conclusion children
+        
+        📋 DEPTH-FORCING PARENT SELECTION:
+        - ALWAYS look for the DEEPEST relevant node to attach to
+        - If analyzing fingerprints → attach to specific fingerprint analysis node, NOT general evidence
+        - If analyzing motives → attach to specific suspect's motive node, NOT general suspect node
+        - If analyzing timeline → attach to specific time period node, NOT general timeline
+        - CREATE SUB-CATEGORIES: Instead of broad analysis, create specific focused analysis
         
         Respond ONLY with valid JSON:
         {{
-            "execution_summary": "What you analyzed from the case files",
-            "detailed_results": "Your findings from the text analysis",
-            "new_findings": "Patterns/connections discovered in the text",
+            "execution_summary": "What specific analysis was performed",
+            "detailed_results": "Specific findings and logical reasoning",
+            "evidence_type": "evidence|suspect|timeline|analysis|conclusion",
             "memory_updates": [
                 {{
                     "action": "ADD_NODE",
-                    "node_name": "Analysis Result",
-                    "description": "Description of your text-based finding",
-                    "parent_node_id": "existing_parent_id_if_applicable"
+                    "node_name": "Specific, Descriptive Node Name",
+                    "description": "Detailed analysis finding with logical reasoning",
+                    "parent_node_id": "EXACT_NODE_ID_FROM_CONTEXT_ABOVE"
                 }}
             ],
             "success": true,
-            "next_recommendations": "Further text analysis that could be done"
+            "tree_building_strategy": "How this connects to existing evidence hierarchy"
         }}
         """
         
@@ -534,19 +632,6 @@ class ExecutorAgent(BaseAgent):
         # Add focused case file content based on task
         task_keywords = task.description.lower().split()
         
-        # Determine which case files are most relevant
-        relevant_files = []
-        if any(word in task_keywords for word in ['forensic', 'evidence', 'fingerprint', 'weapon', 'timeline']):
-            relevant_files.append('forensic_report.txt')
-        if any(word in task_keywords for word in ['police', 'report', 'scene', 'discovery', 'initial']):
-            relevant_files.append('police_report.txt')
-        if any(word in task_keywords for word in ['witness', 'robert', 'statement', 'alibi', 'interview']):
-            relevant_files.append('witness_statement_robert.txt')
-        
-        # If no specific relevance, include all files
-        if not relevant_files:
-            relevant_files = ['forensic_report.txt', 'police_report.txt', 'witness_statement_robert.txt']
-        
         context_parts.append("CASE FILE ANALYSIS TASK - Available Information:")
         context_parts.append("="*50)
         
@@ -563,29 +648,66 @@ KEY CASE FACTS (from the 3 case files):
 • MOTIVE CLUES: Inheritance disputes, victim found "proof" of something
         """)
         
-        # Add current memory tree (condensed)
-        tree_view = self.memory_tree.get_current_view(max_depth=2)
-        if len(tree_view) > 500:
-            tree_view = tree_view[:500] + "...[truncated]"
-        context_parts.append(f"CURRENT ANALYSIS PROGRESS:\n{tree_view}")
+        # Add DETAILED current memory tree for better context
+        context_parts.append("CURRENT INVESTIGATION TREE STRUCTURE:")
+        context_parts.append("-" * 40)
         
-        # Add specific file excerpts if relevant
-        if hasattr(self, 'context_bank') and 'document_analyzer' in self.context_bank:
-            analyzer = self.context_bank['document_analyzer']
-            for filename in relevant_files:
-                content = analyzer.get_document_content(filename)
-                if content and not content.startswith("Document"):
-                    # Extract key sections based on task focus
-                    sections = self._extract_relevant_sections(content, task_keywords)
-                    if sections:
-                        context_parts.append(f"\nRELEVANT EXCERPTS from {filename}:")
-                        context_parts.append("-" * 30)
-                        for section in sections[:3]:  # Max 3 sections
-                            context_parts.append(f"• {section}")
+        # Get detailed tree view with node IDs for better parent selection
+        tree_nodes = self._get_tree_nodes_for_context()
+        if tree_nodes:
+            context_parts.append(tree_nodes)
+        else:
+            context_parts.append("Empty tree - this will be the first analysis node")
         
         context_parts.append("\nREMEMBER: You can ONLY analyze the text above. No external systems available.")
         
         return "\n".join(context_parts)
+    
+    def _get_tree_nodes_for_context(self) -> str:
+        """Get formatted tree structure with node IDs for context"""
+        if not self.memory_tree.nodes:
+            return "No existing nodes"
+        
+        # Get nodes organized by categories for better parent selection
+        evidence_nodes = []
+        suspect_nodes = []
+        timeline_nodes = []
+        other_nodes = []
+        
+        for node_id, node in self.memory_tree.nodes.items():
+            name_lower = node.name.lower()
+            node_info = f"• {node.name} (ID: {node_id[:8]}...)"
+            
+            if any(word in name_lower for word in ['evidence', 'forensic', 'fingerprint', 'weapon', 'fabric']):
+                evidence_nodes.append(node_info)
+            elif any(word in name_lower for word in ['hartwell', 'robert', 'suspect', 'motive']):
+                suspect_nodes.append(node_info)
+            elif any(word in name_lower for word in ['timeline', 'appointment', 'time', 'alibi']):
+                timeline_nodes.append(node_info)
+            else:
+                other_nodes.append(node_info)
+        
+        result_parts = []
+        
+        if evidence_nodes:
+            result_parts.append("EVIDENCE NODES:")
+            result_parts.extend(evidence_nodes[:5])  # Limit to 5
+        
+        if suspect_nodes:
+            result_parts.append("\nSUSPECT/MOTIVE NODES:")
+            result_parts.extend(suspect_nodes[:5])
+        
+        if timeline_nodes:
+            result_parts.append("\nTIMELINE NODES:")
+            result_parts.extend(timeline_nodes[:5])
+        
+        if other_nodes:
+            result_parts.append("\nOTHER ANALYSIS NODES:")
+            result_parts.extend(other_nodes[:3])
+        
+        result_parts.append(f"\nTotal nodes: {len(self.memory_tree.nodes)}")
+        
+        return "\n".join(result_parts)
     
     def _extract_relevant_sections(self, content: str, keywords: List[str]) -> List[str]:
         """Extract relevant sections from document content"""
@@ -666,29 +788,38 @@ KEY CASE FACTS (from the 3 case files):
                         description=update.get("description", "Analysis finding")
                     )
                     
-                    # Handle parent node ID - try to find by name if not a valid ID
+                    # Mark node as completed since it represents a successful task result
+                    node.status = NodeStatus.COMPLETED if result.success else NodeStatus.FAILED
+                    
+                    # IMPROVED: Handle parent node ID with better resolution strategy
                     parent_id = update.get("parent_node_id")
                     if parent_id:
-                        # Try to find node by name if the provided ID doesn't exist
-                        if parent_id not in self.memory_tree.nodes:
-                            # Search for node by name
-                            matching_nodes = [
-                                node_id for node_id, node in self.memory_tree.nodes.items()
-                                if parent_id.lower() in node.name.lower()
+                        # Try exact ID match first
+                        if parent_id in self.memory_tree.nodes:
+                            self._log_execution("parent_node_exact_match", {
+                                "node_id": parent_id,
+                                "node_name": self.memory_tree.nodes[parent_id].name
+                            })
+                        # Try partial ID match (first 8 chars)
+                        elif len(parent_id) >= 8:
+                            matching_ids = [
+                                node_id for node_id in self.memory_tree.nodes.keys()
+                                if node_id.startswith(parent_id[:8])
                             ]
-                            if matching_nodes:
-                                parent_id = matching_nodes[0]
-                                self._log_execution("parent_node_resolved", {
+                            if matching_ids:
+                                parent_id = matching_ids[0]
+                                self._log_execution("parent_node_partial_id_resolved", {
                                     "requested": update.get("parent_node_id"),
                                     "resolved_to": parent_id
                                 })
                             else:
-                                self._log_execution("parent_node_not_found", {
-                                    "requested": update.get("parent_node_id"),
-                                    "available_nodes": list(self.memory_tree.nodes.keys())[:5]
-                                })
-                                # Use the tree's root node as parent if no specific parent found
-                                parent_id = self.memory_tree.root_id
+                                parent_id = self._find_best_parent_by_content(node, update.get("parent_node_id"))
+                        # Try to find node by name/content similarity
+                        else:
+                            parent_id = self._find_best_parent_by_content(node, update.get("parent_node_id"))
+                    else:
+                        # Smart parent selection when no parent specified
+                        parent_id = self._find_best_parent_by_content(node, None)
                     
                     node_id = self.memory_tree.add_node(node, parent_id)
                     
@@ -717,6 +848,134 @@ KEY CASE FACTS (from the 3 case files):
                 
             except Exception as e:
                 logger.error(f"Error committing memory update: {e}")
+    
+    def _find_best_parent_by_content(self, new_node: MemoryNode, requested_parent: str = None) -> str:
+        """Find the best parent node based on content similarity and logical hierarchy"""
+        if not self.memory_tree.nodes:
+            return None  # Will create as root
+        
+        # If a specific parent was requested, try to find it by name
+        if requested_parent:
+            name_matches = [
+                node_id for node_id, node in self.memory_tree.nodes.items()
+                if requested_parent.lower() in node.name.lower() or node.name.lower() in requested_parent.lower()
+            ]
+            if name_matches:
+                best_match = name_matches[0]
+                self._log_execution("parent_node_name_resolved", {
+                    "requested": requested_parent,
+                    "resolved_to": best_match,
+                    "resolved_name": self.memory_tree.nodes[best_match].name
+                })
+                return best_match
+        
+        # AGGRESSIVE DEPTH-FIRST parent selection
+        new_node_lower = new_node.name.lower() + " " + new_node.description.lower()
+        
+        # Categorize new node
+        is_evidence = any(word in new_node_lower for word in ['evidence', 'forensic', 'fingerprint', 'weapon', 'fabric', 'soil'])
+        is_suspect = any(word in new_node_lower for word in ['hartwell', 'robert', 'suspect', 'motive'])
+        is_timeline = any(word in new_node_lower for word in ['timeline', 'appointment', 'time', 'alibi'])
+        is_analysis = any(word in new_node_lower for word in ['analysis', 'conclusion', 'synthesis'])
+        
+        # Find best matching parent by category and content with AGGRESSIVE DEPTH PREFERENCE
+        best_parent = None
+        best_score = 0
+        
+        for node_id, node in self.memory_tree.nodes.items():
+            if node_id == self.memory_tree.root_id:
+                continue  # NEVER use root as parent unless absolutely no other choice
+            
+            node_lower = node.name.lower() + " " + node.description.lower()
+            score = 0
+            
+            # AGGRESSIVE: Category matching with higher scores
+            if is_evidence and any(word in node_lower for word in ['evidence', 'forensic', 'investigation']):
+                score += 5  # Increased from 3
+            elif is_suspect and any(word in node_lower for word in ['hartwell', 'robert', 'suspect', 'motive']):
+                score += 5  # Increased from 3
+            elif is_timeline and any(word in node_lower for word in ['timeline', 'appointment', 'time']):
+                score += 5  # Increased from 3
+            elif is_analysis and any(word in node_lower for word in ['analysis', 'synthesis']):
+                score += 4  # Increased from 2
+            
+            # Content similarity with higher weight
+            shared_words = set(new_node_lower.split()) & set(node_lower.split())
+            score += len([w for w in shared_words if len(w) > 3]) * 2  # Double weight
+            
+            # AGGRESSIVE DEPTH PREFERENCE: Heavily prefer deeper nodes
+            node_depth = self._get_node_depth(node_id)
+            if node_depth >= 2:
+                score += 10  # HUGE bonus for depth 2+
+            elif node_depth >= 1:
+                score += 5   # Good bonus for depth 1
+            else:
+                score -= 5   # Penalty for shallow nodes
+            
+            # Extra bonus for leaf nodes (they need children)
+            if self._is_leaf_node(node_id):
+                score += 3
+            
+            # Penalty for nodes that already have many children (encourage balanced growth)
+            child_count = len([n for n in self.memory_tree.nodes.values() if n.parent_id == node_id])
+            if child_count >= 3:
+                score -= 2
+            
+            if score > best_score:
+                best_score = score
+                best_parent = node_id
+        
+        # AGGRESSIVE: Only use root as absolute last resort and with high penalty
+        if best_score < 3:  # Increased threshold from 2
+            # Try to find ANY non-root node rather than defaulting to root
+            non_root_nodes = [nid for nid in self.memory_tree.nodes.keys() if nid != self.memory_tree.root_id]
+            if non_root_nodes:
+                # Pick the deepest available node
+                deepest_node = max(non_root_nodes, key=self._get_node_depth)
+                best_parent = deepest_node
+                self._log_execution("parent_forced_depth", {
+                    "forced_parent": deepest_node,
+                    "depth": self._get_node_depth(deepest_node),
+                    "reason": "avoiding root attachment"
+                })
+            else:
+                best_parent = self.memory_tree.root_id
+        
+        if best_parent:
+            self._log_execution("parent_node_smart_selected", {
+                "selected": best_parent,
+                "selected_name": self.memory_tree.nodes[best_parent].name if best_parent in self.memory_tree.nodes else "root",
+                "score": best_score,
+                "new_node_category": "evidence" if is_evidence else "suspect" if is_suspect else "timeline" if is_timeline else "analysis" if is_analysis else "other"
+            })
+        
+        return best_parent
+    
+    def _get_node_depth(self, node_id: str) -> int:
+        """Get the depth of a node in the tree"""
+        if not node_id or node_id not in self.memory_tree.nodes:
+            return 0
+        
+        depth = 0
+        current_id = node_id
+        visited = set()
+        
+        while current_id and current_id != self.memory_tree.root_id and current_id not in visited:
+            visited.add(current_id)
+            node = self.memory_tree.nodes.get(current_id)
+            if not node or not node.parent_id:
+                break
+            current_id = node.parent_id
+            depth += 1
+            
+            if depth > 10:  # Prevent infinite loops
+                break
+        
+        return depth
+    
+    def _is_leaf_node(self, node_id: str) -> bool:
+        """Check if a node is a leaf (has no children)"""
+        return not any(node.parent_id == node_id for node in self.memory_tree.nodes.values())
 
 
 class SynthesisAgent(BaseAgent):
@@ -757,50 +1016,66 @@ class SynthesisAgent(BaseAgent):
             queue_stats = self.task_queue.get_queue_statistics()
             
             # Get recent memory updates
-            recent_nodes = self.memory_tree.get_recent_nodes(limit=10)
+            recent_nodes = self.memory_tree.get_recent_nodes(limit=8)
             total_tasks = queue_stats['completed_tasks'] + queue_stats['failed_tasks']
             
-            synthesis_prompt = f"""
-            You are the Synthesis Agent conducting strategic analysis of the investigation.
+            # Enhanced analysis of evidence quality and depth
+            evidence_depth_score = min(tree_stats['max_depth'] / 4.0, 1.0)  # Normalize depth
+            evidence_breadth_score = min(tree_stats['total_nodes'] / 30.0, 1.0)  # Normalize breadth
             
-            CURRENT STATE:
+            synthesis_prompt = f"""
+            You are the Synthesis Agent conducting ENHANCED strategic analysis with depth focus.
+            
+            CURRENT INVESTIGATION STATE:
             - Memory tree: {tree_stats['total_nodes']} nodes, depth {tree_stats['max_depth']}
+            - Evidence depth score: {evidence_depth_score:.2f} (higher = deeper analysis)
+            - Evidence breadth score: {evidence_breadth_score:.2f} (higher = more comprehensive)
             - Tasks: {queue_stats['pending_tasks']} pending, {queue_stats['completed_tasks']} completed
             - Analysis round: {self.analysis_count}
             - Total tasks completed: {total_tasks}
             
-            RECENT MEMORY UPDATES:
+            RECENT EVIDENCE DEVELOPMENTS:
             {self._format_recent_nodes(recent_nodes)}
             
-            CRITICAL CONTEXT:
-            - This is a SIMULATION environment - real databases/interviews are not possible
-            - If tasks keep requesting AFIS results or alibi verification repeatedly, recommend CONCLUDE
-            - Focus on ANALYSIS of existing evidence, not gathering impossible new evidence
+            ENHANCED SYNTHESIS FRAMEWORK:
+            - EVIDENCE QUALITY: Assess strength and reliability of evidence chains
+            - LOGICAL CONNECTIONS: Evaluate how well evidence pieces connect
+            - CONFIDENCE CALCULATION: Base confidence on evidence depth, not just quantity
+            - STRATEGIC DIRECTION: Focus on evidence gaps vs. broad exploration
             
-            SYNTHESIS ANALYSIS REQUIRED:
-            1. **Investigation Confidence Level** (0.0-1.0): Based on available simulation evidence
-            2. **Key Patterns**: What patterns emerge from the evidence?
-            3. **Critical Analysis**: Can we draw conclusions from existing evidence?
-            4. **Strategic Recommendation**: 
-               - CONTINUE: If new analysis is needed (not repetitive tasks)
-               - CONCLUDE: If we have sufficient evidence for case resolution (especially if 15+ tasks completed)
+            IMPROVED SYNTHESIS ANALYSIS:
+            1. **Evidence Chain Strength** (0.0-1.0): How well connected is the evidence?
+            2. **Logical Consistency** (0.0-1.0): How consistent are the findings?
+            3. **Investigation Confidence Level** (0.0-1.0): Overall case strength
+            4. **Evidence Quality Assessment**: What's the strongest/weakest evidence?
+            5. **Strategic Recommendation**:
+               - CONTINUE: If critical evidence gaps exist and can be filled
+               - CONCLUDE: If evidence forms strong logical chain (confidence > 0.75)
                - FOCUS: If specific evidence needs deeper analysis
+            6. **Priority Focus**: Most important evidence to strengthen next
             
-            5. **Priority Focus**: What specific analysis should be prioritized?
+            ENHANCED STOPPING CRITERIA:
+            - Confidence > 0.8 OR Evidence depth score > 0.7: Consider CONCLUDE
+            - Tasks > 8 AND confidence > 0.7: Likely sufficient evidence
+            - Strong evidence chain with logical consistency > 0.8: CONCLUDE
+            - Repetitive tasks without new insights: CONCLUDE
             
-            STOPPING CRITERIA:
-            - If we have 15+ tasks completed and confidence > 0.65, consider CONCLUDE
-            - If recent tasks are repetitive (AFIS requests, alibi checks), recommend CONCLUDE
-            - Focus on logical deduction from available evidence
+            CONFIDENCE CALCULATION GUIDANCE:
+            - High confidence: Multiple evidence sources point to same conclusion
+            - Medium confidence: Some evidence supports conclusion, minor gaps remain
+            - Low confidence: Evidence is circumstantial or conflicting
             
             Respond in JSON format:
             {{
+                "evidence_chain_strength": 0.0-1.0,
+                "logical_consistency": 0.0-1.0,
                 "confidence_level": 0.0-1.0,
-                "key_patterns": ["pattern1", "pattern2"],
-                "critical_gaps": ["gap1", "gap2"],
+                "evidence_quality_assessment": "strongest and weakest evidence summary",
+                "key_patterns": ["concrete pattern1", "concrete pattern2"],
+                "critical_gaps": ["specific gap1", "specific gap2"],
                 "strategic_recommendation": "CONTINUE|CONCLUDE|FOCUS",
-                "priority_focus": "specific analysis area",
-                "reasoning": "explanation of recommendation"
+                "priority_focus": "specific evidence to strengthen",
+                "reasoning": "detailed logical explanation"
             }}
             """
             
@@ -808,20 +1083,40 @@ class SynthesisAgent(BaseAgent):
             synthesis_result = self._extract_json_from_response(response)
             
             if synthesis_result:
-                # Log synthesis insights
+                # Log enhanced synthesis insights
                 confidence = synthesis_result.get('confidence_level', 0)
+                evidence_chain_strength = synthesis_result.get('evidence_chain_strength', 0)
+                logical_consistency = synthesis_result.get('logical_consistency', 0)
                 recommendation = synthesis_result.get('strategic_recommendation', 'CONTINUE')
                 
                 logger.info(f"[SYNTHESIS] Confidence: {confidence:.2f}")
+                logger.info(f"[SYNTHESIS] Evidence chain strength: {evidence_chain_strength:.2f}")
+                logger.info(f"[SYNTHESIS] Logical consistency: {logical_consistency:.2f}")
                 logger.info(f"[SYNTHESIS] Recommendation: {recommendation}")
-                logger.info(f"[SYNTHESIS] Focus: {synthesis_result.get('priority_focus', 'General investigation')}")
+                logger.info(f"[SYNTHESIS] Priority focus: {synthesis_result.get('priority_focus', 'General investigation')}")
                 
-                # Adjust confidence based on task count and patterns
-                if total_tasks >= 20 and confidence < 0.8:
-                    adjusted_confidence = min(0.85, confidence + 0.1)
-                    logger.info(f"[SYNTHESIS] 📈 Adjusted confidence from {confidence:.2f} to {adjusted_confidence:.2f} (sufficient tasks completed)")
-                    synthesis_result['confidence_level'] = adjusted_confidence
-                    confidence = adjusted_confidence
+                # Enhanced confidence adjustment based on multiple factors
+                base_confidence = confidence
+                
+                # Factor 1: Evidence depth and breadth balance
+                if evidence_depth_score > 0.6 and evidence_breadth_score > 0.6:
+                    confidence = min(1.0, confidence + 0.05)
+                    logger.info(f"[SYNTHESIS] 📈 +0.05 confidence for balanced evidence (depth: {evidence_depth_score:.2f}, breadth: {evidence_breadth_score:.2f})")
+                
+                # Factor 2: Strong evidence chains
+                if evidence_chain_strength > 0.75 and logical_consistency > 0.75:
+                    confidence = min(1.0, confidence + 0.1)
+                    logger.info(f"[SYNTHESIS] 📈 +0.10 confidence for strong evidence chains")
+                
+                # Factor 3: Sufficient task completion with good results
+                if total_tasks >= 6 and confidence >= 0.7:
+                    confidence = min(1.0, confidence + 0.05)
+                    logger.info(f"[SYNTHESIS] 📈 +0.05 confidence for sufficient task completion ({total_tasks} tasks)")
+                
+                # Update synthesis result with adjusted confidence
+                if confidence != base_confidence:
+                    synthesis_result['confidence_level'] = confidence
+                    logger.info(f"[SYNTHESIS] 🎯 Final adjusted confidence: {base_confidence:.2f} → {confidence:.2f}")
                 
                 # Store synthesis in memory tree
                 synthesis_node = MemoryNode(
@@ -830,13 +1125,18 @@ class SynthesisAgent(BaseAgent):
                            f"Recommendation: {recommendation}, "
                            f"Focus: {synthesis_result.get('priority_focus', 'General')}"
                 )
+                synthesis_node.status = NodeStatus.COMPLETED
                 self.memory_tree.add_node(synthesis_node, self.memory_tree.root_id)
                 
                 # Check if we should stop
                 if confidence >= self.confidence_threshold or recommendation == 'CONCLUDE' or total_tasks >= 25:
-                    reason = f"Investigation confidence reached {confidence:.2f}" if confidence >= self.confidence_threshold else f"Recommendation: {recommendation}" if recommendation == 'CONCLUDE' else "Maximum task threshold reached"
-                    logger.info(f"[SYNTHESIS] 🎯 {reason} - Recommending conclusion")
-                    await self._signal_investigation_complete(synthesis_result)
+                    # Don't create duplicate conclusions
+                    if not self._conclusion_exists_in_tree():
+                        reason = f"Investigation confidence reached {confidence:.2f}" if confidence >= self.confidence_threshold else f"Recommendation: {recommendation}" if recommendation == 'CONCLUDE' else "Maximum task threshold reached"
+                        logger.info(f"[SYNTHESIS] 🎯 {reason} - Recommending conclusion")
+                        await self._signal_investigation_complete(synthesis_result)
+                    else:
+                        logger.info("[SYNTHESIS] 🛑 Conclusion already exists - skipping duplicate creation")
                 
                 return synthesis_result
             
@@ -848,6 +1148,11 @@ class SynthesisAgent(BaseAgent):
         """Signal that investigation should conclude and force immediate completion"""
         confidence = synthesis_result.get('confidence_level', 0)
         logger.info(f"[SYNTHESIS] 🏁 Forcing immediate investigation conclusion (confidence: {confidence:.2f})")
+        
+        # Check if conclusion already exists to prevent duplicates
+        if self._conclusion_exists_in_tree():
+            logger.info("[SYNTHESIS] 🛑 Conclusion already exists - skipping duplicate creation")
+            return
         
         try:
             # Force immediate conclusion without API calls to avoid rate limits
@@ -875,6 +1180,7 @@ class SynthesisAgent(BaseAgent):
                 name="SYNTHESIS FINAL CONCLUSION",
                 description=conclusion_text
             )
+            conclusion_node.status = NodeStatus.COMPLETED
             
             if self.memory_tree.root_id:
                 self.memory_tree.add_node(conclusion_node, self.memory_tree.root_id)
@@ -886,24 +1192,47 @@ class SynthesisAgent(BaseAgent):
         except Exception as e:
             logger.error(f"[SYNTHESIS] ❌ Error creating forced conclusion: {e}")
             # Fallback to queued task if direct creation fails
-            conclusion_task = Task(
-                description="Investigation Conclusion",
-                instructions=f"""
-                Based on synthesis analysis, the investigation has reached sufficient confidence ({confidence:.2f}).
+            if not self.task_queue.has_conclusion_task():
+                conclusion_task = Task(
+                    description="Investigation Conclusion",
+                    instructions=f"""
+                    Based on synthesis analysis, the investigation has reached sufficient confidence ({confidence:.2f}).
+                    
+                    Create a comprehensive investigation summary including:
+                    1. Key findings and evidence
+                    2. Suspect profile and motives
+                    3. Timeline of events
+                    4. Recommended next steps
+                    
+                    Patterns identified: {synthesis_result.get('key_patterns', [])}
+                    Reasoning: {synthesis_result.get('reasoning', 'High confidence reached')}
+                    """,
+                    priority=TaskPriority.CRITICAL
+                )
+                self.task_queue.add_task(conclusion_task)
+                logger.info("[SYNTHESIS] 🏁 Added fallback investigation conclusion task")
+            else:
+                logger.info("[SYNTHESIS] 🛑 Conclusion task already exists in queue - skipping fallback")
+
+    def _conclusion_exists_in_tree(self) -> bool:
+        """Check if a conclusion node already exists in the memory tree"""
+        try:
+            if not self.memory_tree:
+                return False
                 
-                Create a comprehensive investigation summary including:
-                1. Key findings and evidence
-                2. Suspect profile and motives
-                3. Timeline of events
-                4. Recommended next steps
-                
-                Patterns identified: {synthesis_result.get('key_patterns', [])}
-                Reasoning: {synthesis_result.get('reasoning', 'High confidence reached')}
-                """,
-                priority=TaskPriority.CRITICAL
-            )
-            self.task_queue.add_task(conclusion_task)
-            logger.info("[SYNTHESIS] 🏁 Added fallback investigation conclusion task")
+            # Look for conclusion nodes in the tree (don't require root_id)
+            for node in self.memory_tree.nodes.values():
+                node_name = node.name.upper()
+                conclusion_keywords = ['FINAL CONCLUSION', 'INVESTIGATION CONCLUDED', 'SYNTHESIS FINAL', 'FINAL INVESTIGATION CONCLUSION']
+                if any(keyword in node_name for keyword in conclusion_keywords):
+                    logger.info(f"[SYNTHESIS] 🎯 Found existing conclusion node: {node.name}")
+                    return True
+                    
+            return False
+            
+        except Exception as e:
+            logger.error(f"[SYNTHESIS] Error checking for conclusion in tree: {e}")
+            return False
 
     def _format_recent_nodes(self, recent_nodes):
         """Format recent nodes for synthesis prompt"""

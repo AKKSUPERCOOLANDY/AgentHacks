@@ -178,10 +178,18 @@ class DocumentAnalysisSystem:
         # Execute document analysis with proper stopping conditions
         logger.info("🔍 Executing document analysis...")
         results = []
+        final_conclusion = None
         max_iterations = 100  # Safety limit
         iteration = 0
         
         while iteration < max_iterations:
+            # Check for conclusion BEFORE getting next task
+            conclusion_found, conclusion_text = self._check_for_forced_conclusion()
+            if conclusion_found:
+                logger.info("🏁 IMMEDIATE STOP: Conclusion detected before task processing")
+                final_conclusion = conclusion_text
+                break
+                
             next_task = self.task_queue.get_next_task()
             if not next_task:
                 logger.info("📋 No more tasks in queue")
@@ -194,8 +202,15 @@ class DocumentAnalysisSystem:
             result = await self.agent_system.executor.execute_task(next_task)
             results.append(result)
             
-            # Initialize synthesis_result for this iteration
-            synthesis_result = None
+            # IMMEDIATE CHECK: After task execution
+            conclusion_found, conclusion_text = self._check_for_forced_conclusion()
+            if conclusion_found:
+                logger.info("🏁 IMMEDIATE STOP: Conclusion detected after task execution")
+                final_conclusion = conclusion_text
+                # Mark task as completed quickly and exit immediately
+                if result.success:
+                    self.task_queue.mark_completed(next_task.id, result.result)
+                break
             
             # Update task status
             if result.success:
@@ -205,80 +220,52 @@ class DocumentAnalysisSystem:
                 # Get synthesis guidance
                 synthesis_result = await self.agent_system.synthesis.perform_synthesis()
                 
-                # Refine plan with synthesis guidance
-                await self.agent_system.planner.refine_plan(next_task, result.result, synthesis_result)
+                # Check if synthesis recommends stopping IMMEDIATELY
+                if synthesis_result:
+                    confidence = synthesis_result.get('confidence_level', 0)
+                    recommendation = synthesis_result.get('strategic_recommendation', 'CONTINUE')
+                    
+                    if confidence >= 0.8 or recommendation == 'CONCLUDE':
+                        logger.info(f"🎯 Synthesis recommends immediate stopping (confidence: {confidence:.2f})")
+                        final_conclusion = f"Investigation concluded via synthesis with confidence {confidence:.2f}"
+                        break
+                
+                # ONLY refine plan if synthesis doesn't recommend conclusion
+                if not synthesis_result or (synthesis_result.get('confidence_level', 0) < 0.8 and synthesis_result.get('strategic_recommendation', 'CONTINUE') != 'CONCLUDE'):
+                    await self.agent_system.planner.refine_plan(next_task, result.result, synthesis_result)
                 
             else:
                 self.task_queue.mark_failed(next_task.id, result.result)
                 logger.error(f"❌ [{iteration}] Failed: {next_task.description}")
             
-            # Check if synthesis recommends stopping
-            if synthesis_result:
-                confidence = synthesis_result.get('confidence_level', 0)
-                recommendation = synthesis_result.get('strategic_recommendation', 'CONTINUE')
-                
-                if confidence >= 0.8 or recommendation == 'CONCLUDE':
-                    logger.info(f"🎯 Synthesis recommends stopping (confidence: {confidence:.2f})")
-                    break
-            
-            # Check if forced conclusion nodes were added to the memory tree
-            conclusion_found = False
-            for node in self.memory_tree.nodes.values():
-                node_name = node.name.upper()
-                if any(keyword in node_name for keyword in ['FINAL CONCLUSION', 'INVESTIGATION CONCLUDED', 'SYNTHESIS FINAL']):
-                    logger.info(f"🏁 Forced conclusion detected: {node.name} - stopping analysis")
-                    conclusion_found = True
-                    break
-            if conclusion_found:
-                break
-            
-            # Check if a forced conclusion was added to the memory tree
-            if self._check_for_forced_conclusion():
-                logger.info("🏁 Forced conclusion detected in memory tree - stopping analysis")
-                break
-            
             # Small delay to see progress
-            await asyncio.sleep(2)
+            await asyncio.sleep(1)
         
         logger.info(f"📊 Document analysis complete! ({iteration} iterations)")
-        return results
+        return results, final_conclusion
     
-    def _check_for_forced_conclusion(self) -> bool:
-        """Check if a forced conclusion node has been added to the memory tree"""
+    def _check_for_forced_conclusion(self) -> tuple[bool, str]:
+        """Check if a forced conclusion node has been added to the memory tree or task queue"""
         try:
-            if not self.memory_tree or not self.memory_tree.root_id:
-                return False
+            # Check memory tree for conclusion nodes
+            if self.memory_tree and self.memory_tree.root_id:
+                for node in self.memory_tree.nodes.values():
+                    node_name = node.name.upper()
+                    conclusion_keywords = ['FINAL CONCLUSION', 'INVESTIGATION CONCLUDED', 'SYNTHESIS FINAL', 'FINAL INVESTIGATION CONCLUSION']
+                    if any(keyword in node_name for keyword in conclusion_keywords):
+                        logger.info(f"🎯 Found conclusion node in memory tree: {node.name}")
+                        return True, node.description
             
-            # Look for conclusion nodes in the tree
-            for node in self.memory_tree.nodes.values():
-                node_name = node.name.upper()
-                if any(keyword in node_name for keyword in ['FINAL CONCLUSION', 'INVESTIGATION CONCLUDED', 'SYNTHESIS FINAL']):
-                    return True
+            # Also check if conclusion task exists in queue
+            if self.task_queue and self.task_queue.has_conclusion_task():
+                logger.info("🎯 Found conclusion task in queue")
+                return True, "Investigation conclusion task identified in queue"
             
-            return False
+            return False, ""
             
         except Exception as e:
             logger.error(f"Error checking for forced conclusion: {e}")
-            return False
-    
-    def _check_for_forced_conclusion(self) -> bool:
-        """Check if a forced conclusion node has been added to the memory tree"""
-        try:
-            if not self.memory_tree or not self.memory_tree.root_id:
-                return False
-            
-            # Look for conclusion nodes in the tree
-            for node in self.memory_tree.nodes.values():
-                node_name = node.name.upper()
-                if any(keyword in node_name for keyword in ['FINAL CONCLUSION', 'INVESTIGATION CONCLUDED', 'SYNTHESIS FINAL']):
-                    logger.info(f"🎯 Found forced conclusion node: {node.name}")
-                    return True
-            
-            return False
-            
-        except Exception as e:
-            logger.error(f"Error checking for forced conclusion: {e}")
-            return False
+            return False, ""
     
     async def build_investigation_plan(self):
         """Have agents create an investigation plan based on the analyzed documents"""
@@ -389,11 +376,18 @@ async def main():
         print("="*80)
         
         # Analyze documents
-        analysis_results = await system.analyze_documents()
+        analysis_results, final_conclusion = await system.analyze_documents()
         
         # Check if investigation was force-concluded during document analysis
-        if system._check_for_forced_conclusion():
+        if final_conclusion:
             logger.info("🏁 Investigation concluded during document analysis - skipping further phases")
+            
+            # Display the final conclusion separately
+            print("\n" + "="*80)
+            print("🏁 FINAL INVESTIGATION CONCLUSION")
+            print("="*80)
+            print(final_conclusion)
+            print("="*80)
         else:
             # Build investigation plan
             investigation_result = await system.build_investigation_plan()

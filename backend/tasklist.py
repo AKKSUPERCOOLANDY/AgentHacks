@@ -387,6 +387,17 @@ class TaskQueue:
         completed_tasks.sort(key=lambda t: t.completed_at, reverse=True)
         return completed_tasks[:limit]
     
+    def has_conclusion_task(self) -> bool:
+        """Check if there's already a conclusion task in the queue (pending or completed)"""
+        conclusion_keywords = ['final conclusion', 'investigation concluded', 'synthesis final', 'final investigation conclusion']
+        
+        for task in self.tasks.values():
+            task_desc = task.description.lower()
+            if any(keyword in task_desc for keyword in conclusion_keywords):
+                return True
+        
+        return False
+    
     def export_queue_data(self) -> Dict[str, Any]:
         """Export queue data for visualization or analysis"""
         return {
