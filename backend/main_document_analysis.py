@@ -56,11 +56,13 @@ class DocumentAnalysisSystem:
             logger.info("📡 Setting up Gemini AI client...")
             self.gemini_client = GeminiClient()
             
-            # Initialize EMPTY memory tree with clean database
+            # Always create a fresh database for new analysis runs
             db_name = f"db/investigation_{self.session_id}.db"
-            logger.info(f"🌳 Creating empty memory tree (database: {db_name})...")
+            queue_db_name = f"db/tasks_{self.session_id}.db"
+            logger.info(f"🌳 Creating new database: {db_name}")
+            
             self.memory_tree = MemoryTree(db_name)
-            logger.info("Memory tree initialized (empty - will be built from documents)")
+            logger.info("Memory tree connected (new fresh analysis starting)")
             
             # Initialize document analyzer
             logger.info("📄 Setting up document analyzer...")
@@ -74,8 +76,7 @@ class DocumentAnalysisSystem:
                 logger.error("❌ No case documents found! Please add .txt files to the case_files directory")
                 return False
             
-            # Initialize task queue with clean database
-            queue_db_name = f"db/tasks_{self.session_id}.db"
+            # Initialize task queue with same timestamp as memory tree
             logger.info(f"📋 Setting up task queue (database: {queue_db_name})...")
             self.task_queue = TaskQueue(queue_db_name)
             
@@ -193,6 +194,9 @@ class DocumentAnalysisSystem:
             result = await self.agent_system.executor.execute_task(next_task)
             results.append(result)
             
+            # Initialize synthesis_result for this iteration
+            synthesis_result = None
+            
             # Update task status
             if result.success:
                 self.task_queue.mark_completed(next_task.id, result.result)
@@ -217,11 +221,64 @@ class DocumentAnalysisSystem:
                     logger.info(f"🎯 Synthesis recommends stopping (confidence: {confidence:.2f})")
                     break
             
+            # Check if forced conclusion nodes were added to the memory tree
+            conclusion_found = False
+            for node in self.memory_tree.nodes.values():
+                node_name = node.name.upper()
+                if any(keyword in node_name for keyword in ['FINAL CONCLUSION', 'INVESTIGATION CONCLUDED', 'SYNTHESIS FINAL']):
+                    logger.info(f"🏁 Forced conclusion detected: {node.name} - stopping analysis")
+                    conclusion_found = True
+                    break
+            if conclusion_found:
+                break
+            
+            # Check if a forced conclusion was added to the memory tree
+            if self._check_for_forced_conclusion():
+                logger.info("🏁 Forced conclusion detected in memory tree - stopping analysis")
+                break
+            
             # Small delay to see progress
             await asyncio.sleep(2)
         
         logger.info(f"📊 Document analysis complete! ({iteration} iterations)")
         return results
+    
+    def _check_for_forced_conclusion(self) -> bool:
+        """Check if a forced conclusion node has been added to the memory tree"""
+        try:
+            if not self.memory_tree or not self.memory_tree.root_id:
+                return False
+            
+            # Look for conclusion nodes in the tree
+            for node in self.memory_tree.nodes.values():
+                node_name = node.name.upper()
+                if any(keyword in node_name for keyword in ['FINAL CONCLUSION', 'INVESTIGATION CONCLUDED', 'SYNTHESIS FINAL']):
+                    return True
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error checking for forced conclusion: {e}")
+            return False
+    
+    def _check_for_forced_conclusion(self) -> bool:
+        """Check if a forced conclusion node has been added to the memory tree"""
+        try:
+            if not self.memory_tree or not self.memory_tree.root_id:
+                return False
+            
+            # Look for conclusion nodes in the tree
+            for node in self.memory_tree.nodes.values():
+                node_name = node.name.upper()
+                if any(keyword in node_name for keyword in ['FINAL CONCLUSION', 'INVESTIGATION CONCLUDED', 'SYNTHESIS FINAL']):
+                    logger.info(f"🎯 Found forced conclusion node: {node.name}")
+                    return True
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error checking for forced conclusion: {e}")
+            return False
     
     async def build_investigation_plan(self):
         """Have agents create an investigation plan based on the analyzed documents"""
@@ -334,8 +391,12 @@ async def main():
         # Analyze documents
         analysis_results = await system.analyze_documents()
         
-        # Build investigation plan
-        investigation_result = await system.build_investigation_plan()
+        # Check if investigation was force-concluded during document analysis
+        if system._check_for_forced_conclusion():
+            logger.info("🏁 Investigation concluded during document analysis - skipping further phases")
+        else:
+            # Build investigation plan
+            investigation_result = await system.build_investigation_plan()
         
         # Display results
         system.display_results()

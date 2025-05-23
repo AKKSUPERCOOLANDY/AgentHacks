@@ -14,6 +14,9 @@ from fastapi.responses import JSONResponse
 import uvicorn
 import json
 import asyncio
+import logging
+import time
+from pathlib import Path
 
 # Add backend to path for imports
 import sys
@@ -41,6 +44,8 @@ app.add_middleware(
 # Global instances
 memory_tree: Optional[MemoryTree] = None
 task_queue: Optional[TaskQueue] = None
+current_db_path: Optional[str] = None
+auto_refresh_task: Optional[asyncio.Task] = None
 
 # WebSocket connection manager
 class ConnectionManager:
@@ -77,55 +82,156 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+def get_newest_database() -> Optional[str]:
+    """Find the newest investigation database"""
+    try:
+        if not os.path.exists("db"):
+            return None
+            
+        db_files = []
+        for filename in os.listdir("db"):
+            if filename.startswith("investigation_") and filename.endswith(".db"):
+                filepath = os.path.join("db", filename)
+                mtime = os.path.getmtime(filepath)
+                db_files.append((filename, mtime))
+        
+        if not db_files:
+            return None
+            
+        # Sort by modification time and get the newest
+        latest_db = sorted(db_files, key=lambda x: x[1])[-1][0]
+        return f"db/{latest_db}"
+        
+    except Exception as e:
+        logger.error(f"Error finding newest database: {e}")
+        return None
+
+async def auto_refresh_checker():
+    """Background task that checks for newer databases and auto-refreshes"""
+    global current_db_path, memory_tree
+    last_db_mtime = None
+    
+    while True:
+        try:
+            await asyncio.sleep(3)  # Check every 3 seconds for faster detection
+            
+            # Check if current database has been modified (new nodes added)
+            if current_db_path and os.path.exists(current_db_path):
+                current_mtime = os.path.getmtime(current_db_path)
+                if last_db_mtime is None:
+                    last_db_mtime = current_mtime
+                elif current_mtime > last_db_mtime:
+                    logger.info(f"🔄 Current database {current_db_path} has been updated, reloading...")
+                    last_db_mtime = current_mtime
+                    
+                    # Reload the current database to pick up new nodes
+                    if memory_tree:
+                        memory_tree.load_from_database()
+                        logger.info(f"✅ Reloaded tree with {len(memory_tree.nodes)} nodes")
+                        
+                        # Broadcast update to all connected clients
+                        if manager.active_connections:
+                            await broadcast_tree_update()
+            
+            newest_db = get_newest_database()
+            if newest_db and newest_db != current_db_path:
+                # Check if database is at least 2 seconds old (to ensure it's populated)
+                db_age = time.time() - os.path.getmtime(newest_db)
+                if db_age < 2:
+                    logger.info(f"🕐 Database {newest_db} is too new ({db_age:.1f}s), waiting...")
+                    continue
+                
+                # Test if the database has actual data
+                try:
+                    from tree import MemoryTree as TestTree
+                    test_tree = TestTree(newest_db)
+                    if not test_tree.root_id:
+                        logger.info(f"📭 Database {newest_db} has no root data, skipping")
+                        continue
+                    
+                    logger.info(f"🔄 Auto-refresh: Switching to populated database {newest_db}")
+                    old_db = current_db_path
+                    initialize_system()
+                    
+                    if current_db_path != old_db:
+                        logger.info(f"✅ Successfully switched from {old_db} to {current_db_path}")
+                        
+                        # Reset modification time tracking for new database
+                        last_db_mtime = os.path.getmtime(current_db_path) if os.path.exists(current_db_path) else None
+                        
+                        # Broadcast update to all connected clients
+                        if manager.active_connections:
+                            await manager.broadcast(json.dumps({
+                                "type": "database_refresh",
+                                "message": f"Switched to newer database: {newest_db}",
+                                "old_db": old_db,
+                                "new_db": current_db_path
+                            }))
+                            
+                            # Send immediate tree update
+                            await broadcast_tree_update()
+                    else:
+                        logger.info(f"🔄 Already using the newest database: {current_db_path}")
+                        
+                except Exception as e:
+                    logger.error(f"❌ Error testing database {newest_db}: {e}")
+                    continue
+                    
+        except Exception as e:
+            logger.error(f"Error in auto-refresh checker: {e}")
+            await asyncio.sleep(10)
+
 def initialize_system():
     """Initialize the memory tree and task queue"""
-    global memory_tree, task_queue
+    global memory_tree, task_queue, current_db_path
     
     try:
+        logger.info(f"🔄 Initializing system (current_db: {current_db_path})")
         # Ensure db directory exists
         os.makedirs("db", exist_ok=True)
         
         # Find the most recent database files
-        db_files = []
-        if os.path.exists("db"):
-            for filename in os.listdir("db"):
-                if filename.startswith("investigation_") and filename.endswith(".db"):
-                    db_files.append(filename)
+        newest_db = get_newest_database()
         
-        if db_files:
+        if newest_db:
             # Use the most recent investigation database
-            latest_db = sorted(db_files)[-1]
-            db_path = f"db/{latest_db}"
-            print(f"📊 Loading database: {db_path}")
-            memory_tree = MemoryTree(db_path)
+            current_db_path = newest_db
+            logger.info(f"📊 Loading database: {current_db_path}")
+            memory_tree = MemoryTree(current_db_path)
             
             # Find corresponding task queue
-            timestamp = latest_db.replace("investigation_", "").replace(".db", "")
+            filename = os.path.basename(current_db_path)
+            timestamp = filename.replace("investigation_", "").replace(".db", "")
             task_db = f"db/tasks_{timestamp}.db"
             if os.path.exists(task_db):
                 task_queue = TaskQueue(task_db)
-                print(f"📋 Loading task queue: {task_db}")
+                logger.info(f"📋 Loading task queue: {task_db}")
             else:
                 task_queue = TaskQueue("db/task_queue.db")  # fallback
-                print("📋 Using fallback task queue")
+                logger.info("📋 Using fallback task queue")
         else:
             # Create new instances with default paths
-            print("🆕 Creating new memory tree and task queue")
-            memory_tree = MemoryTree("db/memory_tree.db")
+            logger.info("🆕 Creating new memory tree and task queue")
+            current_db_path = "db/memory_tree.db"
+            memory_tree = MemoryTree(current_db_path)
             task_queue = TaskQueue("db/task_queue.db")
             
         # Verify the tree has data
         if memory_tree and hasattr(memory_tree, 'root_id') and memory_tree.root_id:
             root_node = memory_tree.get_node(memory_tree.root_id)
             if root_node:
-                print(f"✅ Memory tree loaded with root: {root_node.name}")
+                logger.info(f"✅ Memory tree loaded with root: {root_node.name}")
             else:
-                print("⚠️ Memory tree has root_id but no root node found")
+                logger.warning("⚠️ Memory tree has root_id but no root node found")
         else:
-            print("⚠️ Memory tree has no root_id")
+            logger.warning("⚠️ Memory tree has no root_id")
             
     except Exception as e:
-        print(f"❌ Error initializing system: {e}")
+        logger.error(f"❌ Error initializing system: {e}")
         # Create minimal fallback instances
         memory_tree = None
         task_queue = None
@@ -148,11 +254,29 @@ def convert_node_to_dict(node: MemoryNode, include_children: bool = True) -> Dic
 @app.on_event("startup")
 async def startup_event():
     """Initialize the system on startup"""
+    global auto_refresh_task
     try:
         initialize_system()
+        
+        # Start auto-refresh background task
+        auto_refresh_task = asyncio.create_task(auto_refresh_checker())
+        print("🔄 Auto-refresh task started")
+        
         print("✅ API server initialized successfully")
     except Exception as e:
         print(f"❌ Error initializing API server: {e}")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup on shutdown"""
+    global auto_refresh_task
+    if auto_refresh_task:
+        auto_refresh_task.cancel()
+        try:
+            await auto_refresh_task
+        except asyncio.CancelledError:
+            pass
+        print("🛑 Auto-refresh task stopped")
 
 @app.get("/")
 async def root():

@@ -262,7 +262,7 @@ const TreeViewer: React.FC<TreeViewerProps> = ({ data, onNodeClick }) => {
           separation={{ siblings: 1.8, nonSiblings: 2.5 }}
           pathFunc="diagonal"
           collapsible={true}
-          initialDepth={3}
+          initialDepth={5}
           pathClassFunc={() => "tree-link"}
           zoom={0.9}
           scaleExtent={{ min: 0.2, max: 3 }}

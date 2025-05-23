@@ -227,16 +227,57 @@ class MemoryTree:
         return matching_nodes
     
     def get_tree_statistics(self) -> Dict[str, Any]:
-        """Get comprehensive tree statistics"""
+        """Get comprehensive tree statistics for connected tree nodes only"""
+        # Get only connected nodes (nodes reachable from root)
+        connected_nodes = self._get_connected_nodes()
+        
         stats = {
-            'total_nodes': len(self.nodes),
-            'root_children': len([n for n in self.nodes.values() if n.parent_id is None]),
+            'total_nodes': len(connected_nodes),
+            'root_children': len(self._get_children(self.root_id)) if self.root_id else 0,
             'max_depth': self._calculate_max_depth(),
-            'nodes_by_status': self._count_nodes_by_status(),
-            'average_children': self._calculate_average_children(),
-            'leaf_nodes': len([n for n in self.nodes.values() if not self._get_children(n.id)])
+            'nodes_by_status': self._count_connected_nodes_by_status(connected_nodes),
+            'average_children': self._calculate_average_children_connected(connected_nodes),
+            'leaf_nodes': len([n for n in connected_nodes if not self._get_children(n.id)])
         }
         return stats
+    
+    def _get_connected_nodes(self) -> List[MemoryNode]:
+        """Get all nodes connected to the tree (reachable from root)"""
+        if not self.root_id or self.root_id not in self.nodes:
+            return []
+        
+        connected = []
+        visited = set()
+        
+        def traverse(node_id: str):
+            if node_id in visited or node_id not in self.nodes:
+                return
+            
+            visited.add(node_id)
+            connected.append(self.nodes[node_id])
+            
+            # Traverse children
+            for child_id in self.nodes[node_id].children_ids:
+                traverse(child_id)
+        
+        traverse(self.root_id)
+        return connected
+    
+    def _count_connected_nodes_by_status(self, connected_nodes: List[MemoryNode]) -> Dict[str, int]:
+        """Count connected nodes by their status"""
+        status_counts = {}
+        for node in connected_nodes:
+            status = node.status.value if hasattr(node.status, 'value') else str(node.status)
+            status_counts[status] = status_counts.get(status, 0) + 1
+        return status_counts
+    
+    def _calculate_average_children_connected(self, connected_nodes: List[MemoryNode]) -> float:
+        """Calculate average number of children per connected node"""
+        if not connected_nodes:
+            return 0.0
+        
+        total_children = sum(len(self._get_children(node.id)) for node in connected_nodes)
+        return total_children / len(connected_nodes)
     
     def _calculate_max_depth(self) -> int:
         """Calculate the maximum depth of the tree"""
