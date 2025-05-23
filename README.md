@@ -1,4 +1,23 @@
-# React + TypeScript + Vite
+# AgentHacks
+
+A React + TypeScript + Vite project with Tailwind CSS.
+
+## Tech Stack
+
+- **React** with TypeScript
+- **Vite** for fast development and building
+- **Tailwind CSS** for styling
+
+## Development
+
+```bash
+npm install
+npm run dev
+```
+
+---
+
+## React + TypeScript + Vite Template Info
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
