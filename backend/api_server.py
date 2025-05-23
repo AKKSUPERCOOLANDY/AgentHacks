@@ -8,7 +8,7 @@ import os
 import asyncio
 from datetime import datetime
 from typing import Dict, List, Any, Optional
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import uvicorn
@@ -17,6 +17,7 @@ import asyncio
 import logging
 import time
 from pathlib import Path
+import shutil
 
 # Add backend to path for imports
 import sys
@@ -25,6 +26,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from tree import MemoryTree, MemoryNode, NodeStatus
 from tasklist import TaskQueue
 from gemini_client import GeminiClient
+from main_document_analysis import DocumentAnalysisSystem
 
 app = FastAPI(
     title="AI Agent Memory Tree API",
@@ -35,7 +37,7 @@ app = FastAPI(
 # Enable CORS for frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],  # Vite dev server
+    allow_origins=["http://localhost:5173", "http://localhost:3000"],  # Fixed ports
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -481,6 +483,382 @@ async def get_system_status():
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error retrieving status: {str(e)}")
+
+# Global variable to track running analysis
+analysis_system: Optional[DocumentAnalysisSystem] = None
+analysis_running = False
+current_session_files: List[str] = []  # Track files uploaded in current session
+
+@app.post("/api/upload")
+async def upload_file(file: UploadFile = File(...)):
+    """Upload a case file for analysis"""
+    global current_session_files
+    try:
+        # Ensure case_files directory exists
+        case_files_dir = Path("case_files")
+        case_files_dir.mkdir(exist_ok=True)
+        
+        # Save the uploaded file
+        file_path = case_files_dir / file.filename
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        # Track this file as part of current session
+        if file.filename not in current_session_files:
+            current_session_files.append(file.filename)
+        
+        logger.info(f"📁 Uploaded file: {file.filename} ({file.size} bytes)")
+        logger.info(f"📋 Current session files: {current_session_files}")
+        
+        return JSONResponse(
+            status_code=200,
+            content={
+                "message": f"File '{file.filename}' uploaded successfully",
+                "filename": file.filename,
+                "size": file.size,
+                "path": str(file_path),
+                "session_files": current_session_files
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ Upload error: {e}")
+        raise HTTPException(status_code=500, detail=f"Error uploading file: {str(e)}")
+
+@app.post("/api/upload-and-analyze")
+async def upload_and_analyze(file: UploadFile = File(...)):
+    """Upload a case file and immediately start analysis"""
+    global current_session_files, analysis_running, analysis_system
+    
+    try:
+        if analysis_running:
+            return JSONResponse(
+                status_code=409,
+                content={"message": "Analysis already running. Please wait for it to complete."}
+            )
+        
+        # Clear session first
+        current_session_files.clear()
+        
+        # Ensure case_files directory exists
+        case_files_dir = Path("case_files")
+        case_files_dir.mkdir(exist_ok=True)
+        
+        # Save the uploaded file
+        file_path = case_files_dir / file.filename
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        # Track this file as the only session file
+        current_session_files = [file.filename]
+        
+        logger.info(f"📁 Direct upload for analysis: {file.filename} ({file.size} bytes)")
+        logger.info(f"📋 Session reset to single file: {current_session_files}")
+        
+        # Check for GEMINI_API_KEY
+        if not os.getenv("GEMINI_API_KEY"):
+            raise HTTPException(
+                status_code=500,
+                detail="GEMINI_API_KEY environment variable not set"
+            )
+        
+        # Start analysis immediately
+        analysis_running = True
+        analysis_system = DocumentAnalysisSystem(session_files=current_session_files)
+        
+        # Run analysis in background
+        asyncio.create_task(run_analysis_background())
+        
+        return JSONResponse(
+            status_code=202,
+            content={
+                "message": f"File '{file.filename}' uploaded and analysis started",
+                "filename": file.filename,
+                "size": file.size,
+                "session_files": current_session_files,
+                "analysis_status": "running"
+            }
+        )
+        
+    except HTTPException:
+        analysis_running = False
+        raise
+    except Exception as e:
+        analysis_running = False
+        logger.error(f"❌ Upload and analyze error: {e}")
+        raise HTTPException(status_code=500, detail=f"Error uploading and analyzing file: {str(e)}")
+
+@app.post("/api/upload/multiple")
+async def upload_multiple_files(files: List[UploadFile] = File(...)):
+    """Upload multiple case files for analysis"""
+    try:
+        # Ensure case_files directory exists
+        case_files_dir = Path("case_files")
+        case_files_dir.mkdir(exist_ok=True)
+        
+        uploaded_files = []
+        
+        for file in files:
+            # Save the uploaded file
+            file_path = case_files_dir / file.filename
+            with open(file_path, "wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
+            
+            uploaded_files.append({
+                "filename": file.filename,
+                "size": file.size,
+                "path": str(file_path)
+            })
+            
+            logger.info(f"📁 Uploaded file: {file.filename} ({file.size} bytes)")
+        
+        return JSONResponse(
+            status_code=200,
+            content={
+                "message": f"Successfully uploaded {len(uploaded_files)} files",
+                "files": uploaded_files
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ Multiple upload error: {e}")
+        raise HTTPException(status_code=500, detail=f"Error uploading files: {str(e)}")
+
+@app.get("/api/files")
+async def list_case_files():
+    """List all uploaded case files"""
+    try:
+        case_files_dir = Path("case_files")
+        if not case_files_dir.exists():
+            return JSONResponse(
+                status_code=200,
+                content={"files": [], "message": "No case files directory found"}
+            )
+        
+        files = []
+        for file_path in case_files_dir.glob("*.txt"):
+            file_stat = file_path.stat()
+            files.append({
+                "filename": file_path.name,
+                "size": file_stat.st_size,
+                "modified": datetime.fromtimestamp(file_stat.st_mtime).isoformat(),
+                "path": str(file_path)
+            })
+        
+        return JSONResponse(
+            status_code=200,
+            content={"files": files, "count": len(files)}
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ Error listing files: {e}")
+        raise HTTPException(status_code=500, detail=f"Error listing files: {str(e)}")
+
+@app.delete("/api/files/{filename}")
+async def delete_case_file(filename: str):
+    """Delete a case file"""
+    try:
+        file_path = Path("case_files") / filename
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail=f"File '{filename}' not found")
+        
+        file_path.unlink()
+        logger.info(f"🗑️ Deleted file: {filename}")
+        
+        return JSONResponse(
+            status_code=200,
+            content={"message": f"File '{filename}' deleted successfully"}
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error deleting file: {e}")
+        raise HTTPException(status_code=500, detail=f"Error deleting file: {str(e)}")
+
+@app.post("/api/analysis/start")
+async def start_document_analysis():
+    """Start document analysis on uploaded case files"""
+    global analysis_system, analysis_running, current_session_files
+    
+    try:
+        if analysis_running:
+            return JSONResponse(
+                status_code=409,
+                content={"message": "Analysis is already running", "status": "running"}
+            )
+        
+        # Check if session files exist
+        if not current_session_files:
+            raise HTTPException(
+                status_code=400, 
+                detail="No files uploaded in current session. Please upload .txt files first."
+            )
+            
+        # Verify the session files actually exist
+        case_files_dir = Path("case_files")
+        missing_files = []
+        for filename in current_session_files:
+            if not (case_files_dir / filename).exists():
+                missing_files.append(filename)
+        
+        if missing_files:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Session files not found: {missing_files}"
+            )
+        
+        # Check for GEMINI_API_KEY
+        if not os.getenv("GEMINI_API_KEY"):
+            raise HTTPException(
+                status_code=500,
+                detail="GEMINI_API_KEY environment variable not set"
+            )
+        
+        logger.info("🔬 Starting document analysis...")
+        logger.info(f"📋 Analyzing session files: {current_session_files}")
+        analysis_running = True
+        
+        # Initialize and start the analysis system with session-specific files
+        analysis_system = DocumentAnalysisSystem(session_files=current_session_files)
+        
+        # Run analysis in background
+        asyncio.create_task(run_analysis_background())
+        
+        return JSONResponse(
+            status_code=202,
+            content={
+                "message": "Document analysis started successfully",
+                "status": "running",
+                "timestamp": datetime.now().isoformat()
+            }
+        )
+        
+    except HTTPException:
+        analysis_running = False
+        raise
+    except Exception as e:
+        analysis_running = False
+        logger.error(f"❌ Error starting analysis: {e}")
+        raise HTTPException(status_code=500, detail=f"Error starting analysis: {str(e)}")
+
+async def run_analysis_background():
+    """Run the document analysis in the background"""
+    global analysis_system, analysis_running
+    
+    try:
+        if not analysis_system:
+            logger.error("No analysis system initialized")
+            return
+        
+        # Initialize the system
+        success = await analysis_system.initialize_system()
+        if not success:
+            logger.error("Failed to initialize analysis system")
+            return
+        
+        # Broadcast start message
+        await manager.broadcast(json.dumps({
+            "type": "analysis_status",
+            "data": {
+                "status": "running",
+                "message": "Document analysis started",
+                "timestamp": datetime.now().isoformat()
+            }
+        }))
+        
+        # Run the analysis
+        logger.info("🔍 Running document analysis...")
+        analysis_results, final_conclusion = await analysis_system.analyze_documents()
+        
+        # Broadcast completion message
+        await manager.broadcast(json.dumps({
+            "type": "analysis_status", 
+            "data": {
+                "status": "completed",
+                "message": "Document analysis completed successfully",
+                "conclusion": final_conclusion,
+                "timestamp": datetime.now().isoformat()
+            }
+        }))
+        
+        # Broadcast final tree update
+        await broadcast_tree_update()
+        
+        logger.info("✅ Document analysis completed successfully")
+        
+    except Exception as e:
+        logger.error(f"❌ Background analysis error: {e}")
+        import traceback
+        traceback.print_exc()
+        
+        # Broadcast error message
+        await manager.broadcast(json.dumps({
+            "type": "analysis_status",
+            "data": {
+                "status": "error",
+                "message": f"Analysis failed: {str(e)}",
+                "timestamp": datetime.now().isoformat()
+            }
+        }))
+        
+    finally:
+        analysis_running = False
+        if analysis_system:
+            await analysis_system.shutdown_system()
+
+@app.get("/api/analysis/status")
+async def get_analysis_status():
+    """Get the current status of document analysis"""
+    global analysis_running, current_session_files
+    
+    try:
+        status = "running" if analysis_running else "idle"
+        
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": status,
+                "session_files_count": len(current_session_files),
+                "session_files": current_session_files,
+                "timestamp": datetime.now().isoformat()
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ Error getting analysis status: {e}")
+        raise HTTPException(status_code=500, detail=f"Error getting analysis status: {str(e)}")
+
+@app.post("/api/session/clear")
+async def clear_session():
+    """Clear current session and start fresh"""
+    global current_session_files, analysis_running
+    
+    try:
+        if analysis_running:
+            return JSONResponse(
+                status_code=409,
+                content={"message": "Cannot clear session while analysis is running"}
+            )
+        
+        # Clear session files
+        old_files = current_session_files.copy()
+        current_session_files.clear()
+        
+        logger.info(f"🗑️ Cleared session files: {old_files}")
+        
+        return JSONResponse(
+            status_code=200,
+            content={
+                "message": "Session cleared successfully",
+                "cleared_files": old_files,
+                "timestamp": datetime.now().isoformat()
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ Error clearing session: {e}")
+        raise HTTPException(status_code=500, detail=f"Error clearing session: {str(e)}")
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):

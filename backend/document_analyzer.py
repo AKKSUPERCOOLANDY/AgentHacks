@@ -48,6 +48,40 @@ class DocumentAnalyzer:
         self.documents = documents
         return documents
     
+    def load_specific_files(self, filenames: List[str]) -> Dict[str, str]:
+        """Load only specific files from the case files directory"""
+        case_files_path = Path(self.case_files_dir)
+        
+        if not case_files_path.exists():
+            logger.warning(f"Case files directory {case_files_path} does not exist")
+            return {}
+        
+        documents = {}
+        
+        logger.info(f"Loading specific files: {filenames}")
+        
+        for filename in filenames:
+            file_path = case_files_path / filename
+            
+            if not file_path.exists():
+                logger.warning(f"Specified file {filename} not found")
+                continue
+                
+            if not filename.endswith('.txt'):
+                logger.warning(f"Skipping non-text file: {filename}")
+                continue
+                
+            try:
+                with open(file_path, 'r', encoding='utf-8') as file:
+                    content = file.read()
+                    documents[filename] = content
+                    logger.info(f"Loaded session file: {filename} ({len(content)} characters)")
+            except Exception as e:
+                logger.error(f"Error reading file {file_path}: {e}")
+        
+        self.documents = documents
+        return documents
+    
     def get_document_summary(self) -> Dict[str, Any]:
         """Get summary of all loaded documents"""
         # Get document types
@@ -216,9 +250,16 @@ if __name__ == "__main__":
     for filename, doc_type in doc_types.items():
         print(f"- {filename}: {doc_type}")
     
-    # Search example
-    search_results = analyzer.search_documents("Victoria Blackwood")
-    print(f"\nSearch results for 'Victoria Blackwood': {len(search_results)} documents")
+    # Search example - use dynamic search based on actual content
+    if documents:
+        # Get first few words from first document for a realistic search
+        first_doc = list(documents.values())[0]
+        words = first_doc.split()[:10]
+        search_term = next((word for word in words if len(word) > 4 and word.isalpha()), "investigation")
+        search_results = analyzer.search_documents(search_term)
+        print(f"\nSearch results for '{search_term}': {len(search_results)} documents")
+    else:
+        print("\nNo documents to search")
     
     # Extract entities from first document
     if documents:

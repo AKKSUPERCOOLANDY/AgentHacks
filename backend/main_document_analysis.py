@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 class DocumentAnalysisSystem:
     """Main system for document-based investigation analysis"""
     
-    def __init__(self):
+    def __init__(self, session_files: list = None):
         self.gemini_client = None
         self.memory_tree = None
         self.task_queue = None
@@ -46,6 +46,7 @@ class DocumentAnalysisSystem:
         self.document_analyzer = None
         self.synthesis_task = None
         self.session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.session_files = session_files or []  # Only analyze these specific files
         
     async def initialize_system(self):
         """Initialize all system components"""
@@ -68,12 +69,17 @@ class DocumentAnalysisSystem:
             logger.info("📄 Setting up document analyzer...")
             self.document_analyzer = DocumentAnalyzer("case_files")
             
-            # Load case files
-            documents = self.document_analyzer.load_case_files()
-            logger.info(f"📋 Loaded {len(documents)} case documents")
+            # Load only session-specific files if specified
+            if self.session_files:
+                documents = self.document_analyzer.load_specific_files(self.session_files)
+                logger.info(f"📋 Loaded {len(documents)} session-specific documents: {list(documents.keys())}")
+            else:
+                documents = self.document_analyzer.load_case_files()
+                logger.info(f"📋 Loaded {len(documents)} case documents")
             
             if not documents:
-                logger.error("❌ No case documents found! Please add .txt files to the case_files directory")
+                error_msg = "No session files found!" if self.session_files else "No case documents found!"
+                logger.error(f"❌ {error_msg}")
                 return False
             
             # Initialize task queue with same timestamp as memory tree
@@ -148,28 +154,28 @@ class DocumentAnalysisSystem:
             )
             self.task_queue.add_task(task)
         
-        # Add a final case resolution task
+        # Add a dynamic case resolution task based on uploaded files
+        file_count = doc_summary['total_documents']
         case_resolution_task = Task(
-            description="Solve the Victoria Blackwood Murder Case",
-            instructions="""
-            Based on all evidence from the 3 case files, solve the murder case by identifying:
+            description=f"Analyze and Solve the Case",
+            instructions=f"""
+            Based on all evidence from the {file_count} case files that have been analyzed, provide a comprehensive case analysis:
             
-            LOGICAL DEDUCTION REQUIRED:
-            1. WHO is the killer? (Consider the Unknown Male fingerprint)
-            2. WHEN did the murder occur? (Use forensic timeline)
-            3. HOW was the murder committed? (Weapon and method)
-            4. WHY was the victim killed? (Motive from evidence)
-            5. HOW did the killer try to cover it up? (Staged break-in?)
+            ANALYSIS REQUIRED:
+            1. SUMMARY: What type of case is this and what are the key facts?
+            2. PEOPLE: Who are the main individuals involved (victims, suspects, witnesses)?
+            3. EVIDENCE: What are the most critical pieces of evidence?
+            4. TIMELINE: What is the sequence of events?
+            5. ANALYSIS: What conclusions can be drawn from the evidence?
+            6. RECOMMENDATIONS: What further investigative steps would be beneficial?
             
-            KEY EVIDENCE TO ANALYZE:
-            • Unknown Male fingerprint on paperweight (not Robert/Margaret/Elena)
-            • Thomas Hartwell's urgent 3:00 PM appointment 
-            • Victim's calendar note about "proof"
-            • Expensive dark blue wool fabric on forced window
-            • Timeline: Death 13:45-14:15, appointment at 15:00
+            Use ONLY the information that has been extracted from the uploaded case files.
+            Focus on connecting evidence and identifying patterns or inconsistencies.
+            If this is a criminal case, identify potential suspects and motives.
+            If this is a missing person case, focus on last known activities and potential leads.
             
-            CONCLUSION: Present your complete solution with evidence supporting each claim.
-            This is the final analysis - make it conclusive and logical.
+            CONCLUSION: Present your complete analysis with evidence supporting each finding.
+            This should be a thorough, professional case analysis based on the available documents.
             """,
             priority=TaskPriority.CRITICAL
         )

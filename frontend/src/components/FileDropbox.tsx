@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import type { DragEvent } from 'react';
 
 interface UploadedFile {
@@ -7,12 +7,22 @@ interface UploadedFile {
   size: number;
   type: string;
   url: string;
+  uploaded: boolean;
+}
+
+interface AnalysisStatus {
+  status: 'idle' | 'running' | 'completed' | 'error';
+  message?: string;
+  conclusion?: string;
 }
 
 const FileDropbox: React.FC = () => {
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [analysisStatus, setAnalysisStatus] = useState<AnalysisStatus>({ status: 'idle' });
+  const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const API_BASE = 'http://localhost:8000';
 
   const formatFileSize = (bytes: number): string => {
     if (bytes === 0) return '0 Bytes';
@@ -32,16 +42,102 @@ const FileDropbox: React.FC = () => {
     return '📁';
   };
 
-  const handleFiles = (files: File[]) => {
+  const uploadFilesToServer = async (files: UploadedFile[]) => {
+    setUploading(true);
+    
+    try {
+      for (const file of files) {
+        // Create FormData for file upload
+        const formData = new FormData();
+        
+        // Convert blob URL back to File object
+        const response = await fetch(file.url);
+        const blob = await response.blob();
+        const fileObj = new File([blob], file.name, { type: file.type });
+        
+        formData.append('file', fileObj);
+        
+        // Upload to server
+        const uploadResponse = await fetch(`${API_BASE}/api/upload`, {
+          method: 'POST',
+          body: formData,
+        });
+        
+        if (uploadResponse.ok) {
+          // Mark file as uploaded
+          setUploadedFiles((prev) =>
+            prev.map((f) =>
+              f.id === file.id ? { ...f, uploaded: true } : f
+            )
+          );
+        } else {
+          throw new Error(`Failed to upload ${file.name}`);
+        }
+      }
+    } catch (error) {
+      console.error('Upload error:', error);
+      alert(`Upload failed: ${error}`);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const startAnalysis = async () => {
+    try {
+      setAnalysisStatus({ status: 'running', message: 'Starting document analysis...' });
+      
+      const response = await fetch(`${API_BASE}/api/analysis/start`, {
+        method: 'POST',
+      });
+      
+      if (response.ok) {
+        setAnalysisStatus({ status: 'running', message: 'Document analysis is running...' });
+      } else {
+        const error = await response.json();
+        throw new Error(error.detail || 'Failed to start analysis');
+      }
+    } catch (error) {
+      console.error('Analysis start error:', error);
+      setAnalysisStatus({ status: 'error', message: `Failed to start analysis: ${error}` });
+    }
+  };
+
+  const fetchAnalysisStatus = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/analysis/status`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.status === 'idle' && analysisStatus.status === 'running') {
+          setAnalysisStatus({ status: 'completed', message: 'Analysis completed successfully!' });
+        }
+      }
+    } catch (error) {
+      console.error('Status fetch error:', error);
+    }
+  };
+
+  // Poll for analysis status
+  useEffect(() => {
+    if (analysisStatus.status === 'running') {
+      const interval = setInterval(fetchAnalysisStatus, 2000);
+      return () => clearInterval(interval);
+    }
+  }, [analysisStatus.status]);
+
+  const handleFiles = async (files: File[]) => {
     const newFiles: UploadedFile[] = files.map((file) => ({
       id: Math.random().toString(36).substring(7),
       name: file.name,
       size: file.size,
       type: file.type,
       url: URL.createObjectURL(file),
+      uploaded: false,
     }));
 
     setUploadedFiles((prev) => [...prev, ...newFiles]);
+    
+    // Auto-upload the files
+    await uploadFilesToServer(newFiles);
   };
 
   const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
@@ -112,13 +208,21 @@ const FileDropbox: React.FC = () => {
                 Drop files here or click to upload
               </h3>
               <p className="text-gray-500 mb-4">
-                Support for any file type • Max file size: 10MB
+                Upload .txt case files for AI analysis • Max file size: 10MB
               </p>
               <button
                 onClick={handleUploadClick}
-                className="bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-medium py-3 px-6 rounded-lg transition-all duration-200 shadow-md hover:shadow-lg transform hover:scale-105"
+                disabled={uploading}
+                className="bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 disabled:from-gray-400 disabled:to-gray-500 text-white font-medium py-3 px-6 rounded-lg transition-all duration-200 shadow-md hover:shadow-lg transform hover:scale-105 disabled:transform-none disabled:cursor-not-allowed flex items-center space-x-2"
               >
-                Choose Files
+                {uploading ? (
+                  <>
+                    <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full"></div>
+                    <span>Uploading...</span>
+                  </>
+                ) : (
+                  <span>Choose Files</span>
+                )}
               </button>
             </div>
           </div>
@@ -130,6 +234,54 @@ const FileDropbox: React.FC = () => {
             className="hidden"
           />
         </div>
+
+        {/* Analysis Control Panel */}
+        {uploadedFiles.length > 0 && (
+          <div className="bg-white/80 backdrop-blur-sm rounded-xl shadow-lg p-6 border border-white/30 mb-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-800">Analysis Control</h3>
+                <p className="text-sm text-gray-600">
+                  {uploadedFiles.filter(f => f.uploaded).length} of {uploadedFiles.length} files uploaded
+                </p>
+              </div>
+              <div className="flex items-center space-x-4">
+                {analysisStatus.status === 'idle' && (
+                  <button
+                    onClick={startAnalysis}
+                    disabled={uploadedFiles.filter(f => f.uploaded).length === 0 || uploading}
+                    className="bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 disabled:from-gray-400 disabled:to-gray-500 text-white font-medium py-2 px-4 rounded-lg transition-all duration-200 shadow-md hover:shadow-lg transform hover:scale-105 disabled:transform-none disabled:cursor-not-allowed"
+                  >
+                    🔬 Start Analysis
+                  </button>
+                )}
+                {analysisStatus.status === 'running' && (
+                  <div className="flex items-center space-x-2 text-blue-600">
+                    <div className="animate-spin w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full"></div>
+                    <span className="font-medium">Analyzing...</span>
+                  </div>
+                )}
+                {analysisStatus.status === 'completed' && (
+                  <div className="flex items-center space-x-2 text-green-600">
+                    <span>✅</span>
+                    <span className="font-medium">Analysis Complete</span>
+                  </div>
+                )}
+                {analysisStatus.status === 'error' && (
+                  <div className="flex items-center space-x-2 text-red-600">
+                    <span>❌</span>
+                    <span className="font-medium">Analysis Failed</span>
+                  </div>
+                )}
+              </div>
+            </div>
+            {analysisStatus.message && (
+              <div className="mt-3 p-3 bg-gray-50 rounded-lg">
+                <p className="text-sm text-gray-700">{analysisStatus.message}</p>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Files List */}
         {uploadedFiles.length > 0 && (
@@ -146,9 +298,16 @@ const FileDropbox: React.FC = () => {
                   <div className="flex items-center space-x-4 flex-1 min-w-0">
                     <div className="text-2xl">{getFileIcon(file.type)}</div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-900 truncate">
-                        {file.name}
-                      </p>
+                      <div className="flex items-center space-x-2">
+                        <p className="text-sm font-medium text-gray-900 truncate">
+                          {file.name}
+                        </p>
+                        {file.uploaded ? (
+                          <span className="text-green-600 text-xs">✅ Uploaded</span>
+                        ) : (
+                          <span className="text-orange-600 text-xs">⏳ Uploading...</span>
+                        )}
+                      </div>
                       <p className="text-sm text-gray-500">
                         {formatFileSize(file.size)}
                       </p>
