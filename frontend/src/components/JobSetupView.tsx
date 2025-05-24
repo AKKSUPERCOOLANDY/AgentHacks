@@ -39,46 +39,11 @@ const JobSetupView: React.FC = () => {
         hour: '2-digit', 
         minute: '2-digit' 
       });
-      setJobName(`Job - ${timestamp}`);
+      setJobName(timestamp);
     }
   }, [selectedFiles, jobName]);
 
-  // Poll for job completion
-  useEffect(() => {
-    let jobAddedToHistory = false; // Flag to prevent duplicate job creation
-    
-    if (jobStatus.status === 'running') {
-      const pollInterval = setInterval(async () => {
-        try {
-          const response = await fetch(`${API_BASE}/api/analysis/summary`);
-          if (response.ok) {
-            const data = await response.json();
-            if (data.summary && !jobAddedToHistory) {
-              setJobSummary(data.summary);
-              
-              // Add completed job to history
-              const completedJob: CompletedJob = {
-                id: Math.random().toString(36).substring(7),
-                name: currentJobName || jobName || 'Untitled Job',
-                completedAt: new Date().toISOString(),
-                summary: data.summary,
-                status: 'completed' as const
-              };
-              
-              setJobHistory(prev => [completedJob, ...prev]);
-              setJobStatus({ status: 'completed', message: 'Job completed successfully!' });
-              jobAddedToHistory = true; // Mark as added
-              clearInterval(pollInterval);
-            }
-          }
-        } catch (error) {
-          console.error('Error polling for completion:', error);
-        }
-      }, 3000);
 
-      return () => clearInterval(pollInterval);
-    }
-  }, [jobStatus.status, setJobSummary, setJobStatus, setJobHistory, currentJobName, jobName]);
 
   const toggleFileSelection = (fileName: string) => {
     setSelectedFiles(prev => 
@@ -128,6 +93,8 @@ const JobSetupView: React.FC = () => {
       
       if (response.ok) {
         setJobStatus({ status: 'running', message: 'Job is running...' });
+        // Auto-redirect to Results page
+        window.dispatchEvent(new CustomEvent('switchTab', { detail: 'results' }));
       } else {
         const error = await response.json();
         throw new Error(error.detail || 'Failed to start job');
@@ -372,28 +339,12 @@ const JobSetupView: React.FC = () => {
 
 
 
-              {/* Job status */}
-              {jobStatus.status !== 'idle' && (
-                <div className="mt-6 bg-gray-50 rounded-lg p-4">
+              {/* Job status - only show errors */}
+              {jobStatus.status === 'error' && (
+                <div className="mt-6 bg-red-50 rounded-lg p-4">
                   <div className="flex items-center space-x-3">
-                    {jobStatus.status === 'running' && (
-                      <>
-                        <div className="animate-spin w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full"></div>
-                        <span className="text-blue-600 font-medium">{jobStatus.message}</span>
-                      </>
-                    )}
-                    {jobStatus.status === 'completed' && (
-                      <>
-                        <span className="text-green-600 text-lg">✅</span>
-                        <span className="text-green-600 font-medium">Job completed! Check the Results tab.</span>
-                      </>
-                    )}
-                    {jobStatus.status === 'error' && (
-                      <>
-                        <span className="text-red-600 text-lg">❌</span>
-                        <span className="text-red-600 font-medium">{jobStatus.message}</span>
-                      </>
-                    )}
+                    <span className="text-red-600 text-lg">❌</span>
+                    <span className="text-red-600 font-medium">{jobStatus.message}</span>
                   </div>
                 </div>
               )}

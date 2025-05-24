@@ -3,20 +3,25 @@ import { useAppContext } from '../contexts/AppContext';
 import type { CompletedJob } from '../contexts/AppContext';
 
 const ResultsView: React.FC = () => {
-  const { jobStatus, currentJobName, setJobSummary, jobSummary, jobHistory, setJobHistory } = useAppContext();
+  const { jobStatus, currentJobName, setJobSummary, jobSummary, jobHistory, setJobHistory, setJobStatus } = useAppContext();
   const [loading, setLoading] = useState(false);
   const [selectedJob, setSelectedJob] = useState<CompletedJob | null>(null);
+  const [currentTreeStats, setCurrentTreeStats] = useState<any>(null);
   const API_BASE = 'http://localhost:8000';
 
-  // Poll for results when job is running and add to history when complete
+  // Poll for job completion when running
   useEffect(() => {
+    let jobAddedToHistory = false; // Flag to prevent duplicate job creation
+    
     if (jobStatus.status === 'running') {
       const pollInterval = setInterval(async () => {
+        console.log('Polling for job completion in ResultsView...'); // Debug log
         try {
           const response = await fetch(`${API_BASE}/api/analysis/summary`);
           if (response.ok) {
             const data = await response.json();
-            if (data.summary) {
+            console.log('Polling response:', data); // Debug log
+            if (data.summary && !jobAddedToHistory) {
               setJobSummary(data.summary);
               
               // Add completed job to history
@@ -25,66 +30,53 @@ const ResultsView: React.FC = () => {
                 name: currentJobName || 'Untitled Job',
                 completedAt: new Date().toISOString(),
                 summary: data.summary,
-                status: 'completed'
+                status: 'completed' as const
               };
               
               setJobHistory(prev => [completedJob, ...prev]);
-              setSelectedJob(completedJob);
+              setJobStatus({ status: 'completed', message: 'Job completed successfully!' });
+              jobAddedToHistory = true; // Mark as added
               clearInterval(pollInterval);
             }
           }
         } catch (error) {
-          console.error('Error polling for results:', error);
+          console.error('Error polling for completion:', error);
         }
       }, 3000);
 
       return () => clearInterval(pollInterval);
     }
-  }, [jobStatus.status, setJobSummary, currentJobName, setJobHistory]);
+  }, [jobStatus.status, setJobSummary, setJobStatus, setJobHistory, currentJobName]);
 
-  // Fetch results on mount if not running
+  // Fetch current tree stats when a job is selected
   useEffect(() => {
-    if (jobStatus.status !== 'running' && !jobSummary && jobHistory.length === 0) {
-      fetchResults();
-    }
-  }, []);
-
-  const fetchResults = async () => {
-    setLoading(true);
-    try {
-      const response = await fetch(`${API_BASE}/api/analysis/summary`);
-      if (response.ok) {
-        const data = await response.json();
-        if (data.summary) {
-          setJobSummary(data.summary);
-          
-          // If we have current job name and summary, add to history
-          if (currentJobName) {
-            const completedJob: CompletedJob = {
-              id: Math.random().toString(36).substring(7),
-              name: currentJobName,
-              completedAt: new Date().toISOString(),
-              summary: data.summary,
-              status: 'completed'
-            };
-            
-            setJobHistory(prev => {
-              // Don't duplicate if already exists
-              if (prev.some(job => job.name === completedJob.name)) {
-                return prev;
-              }
-              return [completedJob, ...prev];
-            });
-            setSelectedJob(completedJob);
+    const fetchTreeStats = async () => {
+      if (selectedJob) {
+        try {
+          const response = await fetch(`${API_BASE}/api/tree/stats`);
+          if (response.ok) {
+            const data = await response.json();
+            setCurrentTreeStats(data.data);
           }
+        } catch (error) {
+          console.error('Error fetching tree stats:', error);
         }
       }
-    } catch (error) {
-      console.error('Error fetching results:', error);
-    } finally {
-      setLoading(false);
+    };
+
+    fetchTreeStats();
+  }, [selectedJob]);
+
+  // When a job completes, automatically show the latest job
+  useEffect(() => {
+    if (jobStatus.status === 'completed' && jobHistory.length > 0) {
+      const latestJob = jobHistory[0];
+      setSelectedJob(latestJob); // Show the most recent completed job
+      setJobSummary(latestJob.summary); // Load the summary automatically
     }
-  };
+  }, [jobStatus.status, jobHistory, setJobSummary]);
+
+
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleString('en-US', {
@@ -131,7 +123,7 @@ const ResultsView: React.FC = () => {
   // Show detailed view if a job is selected
   if (selectedJob) {
     return (
-      <div className="h-full p-6">
+      <div className="h-full p-6 overflow-y-auto">
             {/* Header with back button */}
             <div className="flex items-center mb-8">
               <button
@@ -160,37 +152,71 @@ const ResultsView: React.FC = () => {
                   </div>
                   
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                      <h4 className="font-semibold text-blue-800 mb-1">Files Analyzed</h4>
-                      <div className="text-2xl font-bold text-blue-600">
+                    <div className="rounded-lg p-4 border border-gray-200" style={{ backgroundColor: '#7ECEF4' }}>
+                      <h4 className="font-semibold mb-1" style={{ color: '#19283B' }}>Files Analyzed</h4>
+                      <div className="text-2xl font-bold" style={{ color: '#19283B' }}>
                         {selectedJob.summary.case_overview?.files_analyzed || 0}
                       </div>
-                      <div className="text-sm text-blue-600">
+                      <div className="text-sm" style={{ color: '#3A6B80' }}>
                         Types: {selectedJob.summary.case_overview?.document_types?.join(', ') || 'N/A'}
                       </div>
                     </div>
                     
-                    <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                      <h4 className="font-semibold text-green-800 mb-1">Analysis Depth</h4>
-                      <div className="text-2xl font-bold text-green-600">
-                        {selectedJob.summary.analysis_metrics?.analysis_depth || 0}
+                    <div className="rounded-lg p-4 border border-gray-200" style={{ backgroundColor: '#56A3B1' }}>
+                      <h4 className="font-semibold text-white mb-1">Tree Depth</h4>
+                      <div className="text-2xl font-bold text-white">
+                        {currentTreeStats?.max_depth || selectedJob.summary.analysis_metrics?.analysis_depth || 0}
                       </div>
-                      <div className="text-sm text-green-600">
-                        {selectedJob.summary.analysis_metrics?.total_nodes_created || 0} nodes created
+                      <div className="text-sm text-white opacity-90">
+                        {currentTreeStats?.total_nodes || selectedJob.summary.analysis_metrics?.total_nodes_created || 0} nodes created
                       </div>
                     </div>
                     
-                    <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
-                      <h4 className="font-semibold text-purple-800 mb-1">Tasks Completed</h4>
-                      <div className="text-2xl font-bold text-purple-600">
-                        {selectedJob.summary.analysis_metrics?.tasks_completed || 0}
+                    <div className="rounded-lg p-4 border border-gray-200" style={{ backgroundColor: '#3A6B80' }}>
+                      <h4 className="font-semibold text-white mb-1">Tasks Completed</h4>
+                      <div className="text-2xl font-bold text-white">
+                        {currentTreeStats?.nodes_by_status?.completed || selectedJob.summary.analysis_metrics?.tasks_completed || 0}
                       </div>
-                      <div className="text-sm text-purple-600">
-                        {selectedJob.summary.analysis_metrics?.tasks_failed || 0} failed
+                      <div className="text-sm text-white opacity-90">
+                        {currentTreeStats?.task_stats?.failed_tasks || selectedJob.summary.analysis_metrics?.tasks_failed || 0} failed
                       </div>
                     </div>
                   </div>
                 </div>
+
+                {/* Investigation Conclusion - MOVED TO TOP */}
+                {selectedJob.summary.conclusion && (
+                  <div className="bg-gradient-to-r from-emerald-50 to-blue-50 rounded-xl shadow-lg p-6 border border-emerald-200">
+                    <div className="flex items-center space-x-3 mb-4">
+                      <svg className="w-7 h-7 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
+                      </svg>
+                      <h3 className="text-xl font-bold text-emerald-800">Investigation Conclusion</h3>
+                      {selectedJob.summary.case_status && (
+                        <span className="px-3 py-1 bg-emerald-100 text-emerald-700 text-sm font-medium rounded-full">
+                          {selectedJob.summary.case_status}
+                        </span>
+                      )}
+                    </div>
+                    <div className="bg-white/60 rounded-lg p-4 border border-emerald-100">
+                      <p className="text-gray-800 leading-relaxed text-base font-medium">{selectedJob.summary.conclusion}</p>
+                    </div>
+                    {selectedJob.summary.investigation_confidence && (
+                      <div className="mt-4 flex items-center space-x-3">
+                        <span className="text-sm font-medium text-emerald-700">Investigation Confidence:</span>
+                        <div className="flex-1 bg-emerald-100 rounded-full h-2 max-w-32">
+                          <div 
+                            className="bg-emerald-500 h-2 rounded-full transition-all duration-500"
+                            style={{ width: `${(selectedJob.summary.investigation_confidence * 100)}%` }}
+                          ></div>
+                        </div>
+                        <span className="text-sm font-bold text-emerald-600">
+                          {Math.round(selectedJob.summary.investigation_confidence * 100)}%
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Key Findings */}
                 {selectedJob.summary.key_findings && selectedJob.summary.key_findings.length > 0 && (
@@ -231,22 +257,7 @@ const ResultsView: React.FC = () => {
                   </div>
                 )}
 
-                {/* Conclusion */}
-                {selectedJob.summary.conclusion && (
-                  <div className="bg-white/80 backdrop-blur-sm rounded-xl shadow-lg p-6 border border-white/30">
-                    <div className="flex items-center space-x-3 mb-4">
-                      <svg className="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
-                      </svg>
-                      <h3 className="text-xl font-bold text-gray-800">Conclusion</h3>
-                    </div>
-                    <p className="text-gray-700 leading-relaxed">{selectedJob.summary.conclusion}</p>
-                    <div className="mt-4 p-3 bg-blue-50 rounded-lg">
-                      <span className="text-blue-800 font-medium">Status: </span>
-                      <span className="text-blue-600">{selectedJob.summary.case_status || 'Complete'}</span>
-                    </div>
-                  </div>
-                )}
+
               </div>
             )}
       </div>
@@ -255,33 +266,35 @@ const ResultsView: React.FC = () => {
 
   // Show job history list
   return (
-    <div className="h-full p-6">
-          {/* Running job status */}
-          {jobStatus.status === 'running' && (
-            <div className="bg-blue-50 rounded-lg p-4 mb-6">
-              <div className="flex items-center">
-                <div className="animate-spin w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full mr-3"></div>
-                <div>
-                  <p className="text-blue-800 font-medium">
-                    {currentJobName ? `Running: ${currentJobName}` : 'Job in Progress'}
-                  </p>
-                  <p className="text-blue-600 text-sm">Results will appear here when complete</p>
+    <div className="h-full p-6 overflow-y-auto">
+          {/* Running job - show as job card with yellow icon */}
+          {jobStatus.status === 'running' && currentJobName && (
+            <div className="mb-6">
+              <div className="flex items-center justify-between p-4 bg-white rounded-lg hover:bg-gray-50 transition-all duration-200 shadow-md">
+                <div className="flex items-center space-x-4 flex-1 min-w-0">
+                  <div className="text-2xl">
+                    <div className="animate-spin w-8 h-8 border-4 border-yellow-200 border-t-yellow-500 rounded-full"></div>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900 truncate">
+                      {currentJobName}
+                    </p>
+                    <p className="text-sm text-yellow-600 font-medium">
+                      Running...
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>
           )}
 
           {jobHistory.length > 0 ? (
-            <div className="bg-white/80 backdrop-blur-sm rounded-xl shadow-lg p-6 border border-white/30">
-              <h2 className="text-2xl font-semibold text-gray-800 mb-6">
-                Job History ({jobHistory.length})
-              </h2>
-              <div className="space-y-3">
-                {jobHistory.map((job) => (
-                  <div
-                    key={job.id}
-                    className="flex items-center justify-between p-4 bg-white/40 backdrop-blur-sm rounded-lg hover:bg-white/60 transition-all duration-200 border border-white/20"
-                  >
+            <div className="space-y-4">
+              {jobHistory.map((job) => (
+                <div
+                  key={job.id}
+                  className="flex items-center justify-between p-4 bg-white rounded-lg hover:bg-gray-50 transition-all duration-200 shadow-md"
+                >
                     <div 
                       className="flex items-center space-x-4 flex-1 min-w-0 cursor-pointer"
                       onClick={() => handleJobClick(job)}
@@ -298,18 +311,9 @@ const ResultsView: React.FC = () => {
                         )}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center space-x-2">
-                          <p className="text-sm font-medium text-gray-900 truncate">
-                            {job.name}
-                          </p>
-                          <span className={`text-xs px-2 py-1 rounded-full ${
-                            job.status === 'completed' 
-                              ? 'bg-green-100 text-green-800' 
-                              : 'bg-red-100 text-red-800'
-                          }`}>
-                            {job.status === 'completed' ? 'Completed' : 'Failed'}
-                          </span>
-                        </div>
+                        <p className="text-sm font-medium text-gray-900 truncate">
+                          {job.name}
+                        </p>
                         <p className="text-sm text-gray-500">
                           {formatDate(job.completedAt)}
                         </p>
@@ -339,30 +343,24 @@ const ResultsView: React.FC = () => {
                     </div>
                   </div>
                 ))}
-              </div>
             </div>
           ) : jobStatus.status === 'running' ? null : (
-            <div className="flex flex-col items-center justify-center h-96">
-              <svg className="w-24 h-24 text-gray-300 mb-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div className="text-center py-8">
+              <svg className="w-16 h-16 text-gray-300 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
               </svg>
-              <h3 className="text-2xl font-bold text-gray-800 mb-4">No Jobs Completed</h3>
-              <p className="text-gray-600 text-center mb-8 max-w-md">
-                Complete jobs to see results here
-              </p>
+              <h3 className="text-lg font-medium text-gray-900 mb-2">No Completed Jobs</h3>
+              <p className="text-gray-600 mb-4">Complete jobs to see results here</p>
               <button
                 onClick={() => {
                   window.dispatchEvent(new CustomEvent('switchTab', { detail: 'analysis' }));
                 }}
-                className="text-white font-medium py-4 px-8 rounded-lg transition-colors duration-200 shadow-lg hover:shadow-xl flex items-center justify-center space-x-3 text-lg min-w-[280px] h-[60px]"
+                className="text-white font-medium py-2 px-4 rounded-lg transition-colors duration-200"
                 style={{ backgroundColor: '#56A3B1' }}
                 onMouseEnter={e => (e.target as HTMLElement).style.backgroundColor = '#3A6B80'}
                 onMouseLeave={e => (e.target as HTMLElement).style.backgroundColor = '#56A3B1'}
               >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                </svg>
-                <span>Create New Job</span>
+                Create Job
               </button>
             </div>
           )}

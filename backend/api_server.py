@@ -28,6 +28,7 @@ from tree import MemoryTree, MemoryNode, NodeStatus
 from tasklist import TaskQueue
 from gemini_client import GeminiClient
 from main_document_analysis import DocumentAnalysisSystem
+from summarization_agent import SummarizationAgent
 
 class AnalysisRequest(BaseModel):
     selected_files: List[str] = []
@@ -1023,10 +1024,39 @@ async def get_analysis_status():
 
 @app.get("/api/analysis/summary")
 async def get_analysis_summary():
-    """Get the summary of the last completed analysis"""
-    global last_analysis_summary
+    """Get comprehensive analysis summary using specialized summarization agent"""
+    global last_analysis_summary, memory_tree, task_queue
     
     try:
+        # Try to use the new specialized summarization agent
+        if memory_tree:
+            try:
+                gemini_client = GeminiClient()
+                summarization_agent = SummarizationAgent(gemini_client, memory_tree, task_queue)
+                
+                # Generate comprehensive summary using the specialized agent
+                enhanced_summary = await summarization_agent.generate_comprehensive_summary()
+                
+                # Update the global summary with enhanced data
+                if enhanced_summary:
+                    last_analysis_summary = enhanced_summary
+                    logger.info("📊 Enhanced analysis summary generated using SummarizationAgent")
+                    
+                    return JSONResponse(
+                        status_code=200,
+                        content={
+                            "summary": enhanced_summary,
+                            "timestamp": datetime.now().isoformat(),
+                            "message": "Enhanced analysis summary generated successfully",
+                            "generated_by": "SummarizationAgent"
+                        }
+                    )
+                    
+            except Exception as e:
+                logger.error(f"SummarizationAgent failed: {e}")
+                # Fall through to use existing summary
+        
+        # Fallback to existing summary
         if not last_analysis_summary:
             return JSONResponse(
                 status_code=404,
@@ -1038,7 +1068,8 @@ async def get_analysis_summary():
             content={
                 "summary": last_analysis_summary,
                 "timestamp": datetime.now().isoformat(),
-                "message": "Analysis summary retrieved successfully"
+                "message": "Analysis summary retrieved successfully",
+                "generated_by": "Legacy"
             }
         )
         

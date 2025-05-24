@@ -35,6 +35,19 @@ interface JobSummary {
   }>;
   conclusion: string;
   case_status: string;
+  investigation_confidence?: number; // Added for confidence score
+  suspect_analysis?: Array<{
+    type: string;
+    subject: string;
+    analysis: string;
+  }>; // Added for suspect analysis
+  timeline_reconstruction?: Array<{
+    event: string;
+    details: string;
+    source: string;
+  }>; // Added for timeline
+  ai_insights?: string[]; // Added for AI insights
+  next_steps?: string[]; // Added for next steps
 }
 
 interface CompletedJob {

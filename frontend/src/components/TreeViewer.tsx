@@ -1,5 +1,17 @@
-import React, { useMemo } from 'react';
-import Tree from 'react-d3-tree';
+import React, { useMemo, useCallback } from 'react';
+import {
+  ReactFlow,
+  useNodesState,
+  useEdgesState,
+  addEdge,
+  Controls,
+  Background,
+  MiniMap,
+  Handle,
+  Position,
+} from 'reactflow';
+import type { Connection, Edge, Node } from 'reactflow';
+import 'reactflow/dist/style.css';
 
 interface TreeNode {
   id: string;
@@ -15,259 +27,262 @@ interface TreeViewerProps {
   onNodeClick?: (nodeData: TreeNode) => void;
 }
 
-const TreeViewer: React.FC<TreeViewerProps> = ({ data, onNodeClick }) => {
-  const treeData = useMemo(() => {
-    if (!data) return null;
+// Custom node component
+const CustomNode = ({ data }: { data: any }) => {
+  const getStatusColor = (status: string, nodeName: string) => {
+    // Check if this is a synthesis analysis node
+    if (nodeName.toLowerCase().includes('synthesis analysis')) {
+      switch (status) {
+        case 'completed': return 'bg-orange-300'; // Less saturated orange
+        case 'in_progress': return 'bg-orange-400';
+        case 'failed': return 'bg-red-500';
+        case 'pending': return 'bg-orange-200';
+        default: return 'bg-orange-200';
+      }
+    }
     
-    const convertToD3Format = (node: TreeNode): any => ({
-      name: node.name,
-      attributes: {
-        id: node.id,
-        description: node.description,
-        status: node.status,
-        created_at: node.created_at,
-      },
-      children: node.children?.map(convertToD3Format) || []
-    });
-
-    return convertToD3Format(data);
-  }, [data]);
-
-  const getStatusColor = (status: string) => {
+    // Check if this is a task node (contains "task" or other task indicators)
+    if (nodeName.toLowerCase().includes('task') || 
+        nodeName.toLowerCase().includes('evidence') ||
+        nodeName.toLowerCase().includes('investigation')) {
     switch (status) {
-      case 'completed': return 'url(#greenGradient)';
-      case 'in_progress': return 'url(#blueGradient)';
-      case 'failed': return 'url(#redGradient)';
-      case 'pending': return 'url(#grayGradient)';
-      default: return 'url(#grayGradient)';
+        case 'completed': return 'bg-sky-300'; // Lighter logo color
+        case 'in_progress': return 'bg-sky-400';
+        case 'failed': return 'bg-red-500';
+        case 'pending': return 'bg-sky-200';
+        default: return 'bg-sky-200';
+    }
+    }
+    
+    // Default colors for other node types
+    switch (status) {
+      case 'completed': return 'bg-blue-500';
+      case 'in_progress': return 'bg-blue-600';
+      case 'failed': return 'bg-red-500';
+      case 'pending': return 'bg-gray-500';
+      default: return 'bg-gray-500';
     }
   };
 
-  const getStatusGlow = (status: string) => {
+  const getStatusIcon = (status: string) => {
     switch (status) {
-      case 'completed': return '#10b981';
-      case 'in_progress': return '#3b82f6';
-      case 'failed': return '#ef4444';
-      case 'pending': return '#6b7280';
-      default: return '#6b7280';
-    }
-  };
-
-  const getStatusSymbol = (status: string) => {
-    switch (status) {
-      case 'completed': return '✅';
-      case 'in_progress': return '🔄';
-      case 'failed': return '❌';
+      case 'completed': return '✓';
+      case 'in_progress': return '●';
+      case 'failed': return '✗';
       case 'pending': return '⏳';
-      default: return '❓';
+      default: return '?';
     }
   };
 
-  const renderCustomNodeElement = ({ nodeDatum, toggleNode }: any) => (
-    <g>
-      {/* Gradient Definitions */}
-      <defs>
-        <radialGradient id="greenGradient" cx="30%" cy="30%">
-          <stop offset="0%" stopColor="#34d399" />
-          <stop offset="100%" stopColor="#059669" />
-        </radialGradient>
-        <radialGradient id="blueGradient" cx="30%" cy="30%">
-          <stop offset="0%" stopColor="#60a5fa" />
-          <stop offset="100%" stopColor="#2563eb" />
-        </radialGradient>
-        <radialGradient id="redGradient" cx="30%" cy="30%">
-          <stop offset="0%" stopColor="#f87171" />
-          <stop offset="100%" stopColor="#dc2626" />
-        </radialGradient>
-        <radialGradient id="grayGradient" cx="30%" cy="30%">
-          <stop offset="0%" stopColor="#9ca3af" />
-          <stop offset="100%" stopColor="#4b5563" />
-        </radialGradient>
-        <filter id="glow">
-          <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
-          <feMerge> 
-            <feMergeNode in="coloredBlur"/>
-            <feMergeNode in="SourceGraphic"/>
-          </feMerge>
-        </filter>
-        <filter id="shadow">
-          <feDropShadow dx="2" dy="4" stdDeviation="3" floodOpacity="0.3"/>
-        </filter>
-        <linearGradient id="linkGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-          <stop offset="0%" stopColor="#6366f1" />
-          <stop offset="100%" stopColor="#8b5cf6" />
-        </linearGradient>
-      </defs>
+  return (
+    <div className="relative">
+      <Handle
+        type="target"
+        position={Position.Left}
+        className="w-3 h-3 bg-gray-300 border-2 border-white"
+      />
+      
+      <div
+        className={`
+          min-w-[200px] rounded-lg border-2 border-white shadow-lg cursor-pointer
+          transition-all duration-200 hover:shadow-xl hover:scale-105
+          ${getStatusColor(data.status, data.name)}
+        `}
+        onClick={() => data.onNodeClick?.(data.nodeData)}
+      >
+        <div className="p-4 text-white">
+          <div className="flex items-center space-x-2">
+            <span className="text-lg font-bold">
+              {getStatusIcon(data.status)}
+            </span>
+            <h3 className="font-semibold text-sm leading-tight">
+              {data.name}
+            </h3>
+          </div>
+        </div>
+      </div>
 
-      {/* Outer glow ring */}
-      <circle
-        r={32}
-        fill="none"
-        stroke={getStatusGlow(nodeDatum.attributes?.status || 'pending')}
-        strokeWidth={2}
-        opacity={0.3}
-        filter="url(#glow)"
-        style={{ 
-          cursor: 'pointer',
-          animation: 'pulse 2s infinite'
-        }}
+      <Handle
+        type="source"
+        position={Position.Right}
+        className="w-3 h-3 bg-gray-300 border-2 border-white"
       />
+    </div>
+  );
+};
+
+// Make synthesis analysis names more descriptive
+const getDescriptiveName = (name: string): string => {
+  // Make synthesis analysis more descriptive
+  if (name.toLowerCase().includes('synthesis analysis')) {
+    const match = name.match(/synthesis analysis\s*#?(\d+)/i);
+    if (match) {
+      const number = match[1];
+      return `Deep Analysis Phase ${number}`;
+    }
+    return 'Comprehensive Analysis';
+  }
+  
+  // Return original name for other node types
+  return name;
+};
+
+const nodeTypes = {
+  custom: CustomNode,
+};
+
+const TreeViewer: React.FC<TreeViewerProps> = ({ data, onNodeClick }) => {
+  const { nodes: initialNodes, edges: initialEdges } = useMemo(() => {
+    if (!data) return { nodes: [], edges: [] };
+
+    const nodes: Node[] = [];
+    const edges: Edge[] = [];
+    let nodeId = 0;
+
+    // Convert tree data to React Flow format
+    const convertToFlowFormat = (
+      node: TreeNode, 
+      x: number = 0, 
+      y: number = 0, 
+      parentId?: string
+    ) => {
+      const currentId = `node-${nodeId++}`;
       
-      {/* Main node circle */}
-      <circle
-        r={28}
-        fill={getStatusColor(nodeDatum.attributes?.status || 'pending')}
-        stroke="#ffffff"
-        strokeWidth={3}
-        filter="url(#shadow)"
-        style={{ 
-          cursor: 'pointer',
-          transition: 'all 0.3s ease',
-        }}
-        onClick={() => {
-          toggleNode();
-          if (onNodeClick && nodeDatum.attributes) {
-            onNodeClick({
-              id: nodeDatum.attributes.id,
-              name: nodeDatum.name,
-              description: nodeDatum.attributes.description,
-              status: nodeDatum.attributes.status,
-              created_at: nodeDatum.attributes.created_at,
+      nodes.push({
+        id: currentId,
+        type: 'custom',
+        position: { x, y },
+        data: {
+          name: getDescriptiveName(node.name),
+          description: node.description,
+          status: node.status,
+          nodeData: node,
+          onNodeClick,
+        },
             });
-          }
-        }}
-        onMouseEnter={(e) => {
-          (e.target as SVGCircleElement).setAttribute('r', '32');
-        }}
-        onMouseLeave={(e) => {
-          (e.target as SVGCircleElement).setAttribute('r', '28');
-        }}
-      />
-      
-      {/* Status symbol in center */}
-      <text
-        textAnchor="middle"
-        dominantBaseline="middle"
-        fontSize="20"
-        fill="white"
-        fontWeight="bold"
-        style={{ 
-          pointerEvents: 'none',
-          textShadow: '0 1px 3px rgba(0,0,0,0.5)'
-        }}
-      >
-        {getStatusSymbol(nodeDatum.attributes?.status || 'pending')}
-      </text>
-      
-      {/* Node name with background */}
-      <rect
-        x={-80}
-        y={38}
-        width={160}
-        height={24}
-        fill="rgba(255,255,255,0.95)"
-        stroke="rgba(0,0,0,0.1)"
-        strokeWidth={1}
-        rx={12}
-        filter="url(#shadow)"
-        style={{ pointerEvents: 'none' }}
-      />
-      <text
-        textAnchor="middle"
-        dominantBaseline="middle"
-        fontSize="13"
-        fontWeight="600"
-        fill="#1f2937"
-        y={50}
-        style={{ pointerEvents: 'none' }}
-      >
-        {nodeDatum.name.length > 18 
-          ? `${nodeDatum.name.substring(0, 18)}...` 
-          : nodeDatum.name}
-      </text>
-      
-      {/* Description with background */}
-      <rect
-        x={-90}
-        y={68}
-        width={180}
-        height={20}
-        fill="rgba(248,250,252,0.9)"
-        stroke="rgba(0,0,0,0.05)"
-        strokeWidth={1}
-        rx={10}
-        style={{ pointerEvents: 'none' }}
-      />
-      <text
-        textAnchor="middle"
-        dominantBaseline="middle"
-        fontSize="11"
-        fill="#6b7280"
-        y={78}
-        style={{ pointerEvents: 'none' }}
-      >
-        {nodeDatum.attributes?.description?.length > 25 
-          ? `${nodeDatum.attributes.description.substring(0, 25)}...`
-          : nodeDatum.attributes?.description || ''}
-      </text>
-    </g>
+
+      if (parentId) {
+        edges.push({
+          id: `edge-${parentId}-${currentId}`,
+          source: parentId,
+          target: currentId,
+          type: 'smoothstep',
+          style: {
+            strokeWidth: 2,
+            stroke: '#6366f1',
+          },
+          animated: true,
+        });
+      }
+
+      // Position children
+      if (node.children && node.children.length > 0) {
+        const childSpacing = 150;
+        const startY = y - ((node.children.length - 1) * childSpacing) / 2;
+        
+        node.children.forEach((child, index) => {
+          convertToFlowFormat(
+            child,
+            x + 300,
+            startY + index * childSpacing,
+            currentId
+          );
+        });
+      }
+    };
+
+    convertToFlowFormat(data, 100, 300);
+    return { nodes, edges };
+  }, [data, onNodeClick]);
+
+  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+
+  const onConnect = useCallback(
+    (params: Connection) => setEdges((eds) => addEdge(params, eds)),
+    [setEdges]
   );
 
-  if (!treeData) {
+  if (!data) {
     return (
       <div className="flex items-center justify-center h-full text-gray-500">
         <div className="text-center">
-          <div className="text-4xl mb-4">🌳</div>
-          <p>No tree data available</p>
+          <div className="mb-4">
+            <div className="animate-spin w-12 h-12 border-4 border-gray-200 rounded-full mx-auto"
+                 style={{ borderTopColor: '#56A3B1' }}>
+            </div>
+          </div>
+          <p>Loading graph data...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="w-full h-full relative">
-      <style>{`
-        @keyframes pulse {
-          0%, 100% { opacity: 0.3; }
-          50% { opacity: 0.7; }
-        }
-        .tree-link {
-          stroke: url(#linkGradient);
-          stroke-width: 3;
-          fill: none;
-          opacity: 0.6;
-          transition: all 0.3s ease;
-        }
-        .tree-link:hover {
-          stroke-width: 4;
-          opacity: 1;
-        }
-      `}</style>
-
-      {/* Animated background */}
-      <div className="absolute inset-0 bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 rounded-2xl shadow-2xl">
-        <div className="absolute inset-0 opacity-30" style={{
-          backgroundImage: `url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23e0e7ff' fill-opacity='0.3'%3E%3Cpath d='m36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")`
-        }} />
-      </div>
-
-      {/* Tree container with glassy effect */}
-      <div className="relative z-10 w-full h-full backdrop-blur-sm bg-white/20 rounded-2xl border border-white/30 shadow-xl overflow-hidden">
-        <Tree
-          data={treeData}
-          renderCustomNodeElement={renderCustomNodeElement}
-          orientation="horizontal"
-          translate={{ x: 150, y: 300 }}
-          nodeSize={{ x: 320, y: 200 }}
-          separation={{ siblings: 1.8, nonSiblings: 2.5 }}
-          pathFunc="diagonal"
-          collapsible={true}
-          initialDepth={5}
-          pathClassFunc={() => "tree-link"}
-          zoom={0.9}
-          scaleExtent={{ min: 0.2, max: 3 }}
+    <div className="w-full h-full">
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
+        onConnect={onConnect}
+        nodeTypes={nodeTypes}
+        fitView
+        fitViewOptions={{
+          padding: 0.1,
+          minZoom: 0.5,
+          maxZoom: 1.5,
+        }}
+        className="bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100"
+      >
+        <Controls className="bg-white border border-gray-200 rounded-lg shadow-lg" />
+        <MiniMap 
+          className="bg-white border border-gray-200 rounded-lg shadow-lg"
+          nodeColor={(node) => {
+            const nodeName = node.data?.name || '';
+            const status = node.data?.status || 'pending';
+            
+            // Use the exact same logic as the main tree visualization
+            // Check if this is a synthesis analysis node
+            if (nodeName.toLowerCase().includes('synthesis analysis')) {
+              switch (status) {
+                case 'completed': return '#fdba74'; // orange-300
+                case 'in_progress': return '#fb923c'; // orange-400
+                case 'failed': return '#ef4444';
+                case 'pending': return '#fed7aa'; // orange-200
+                default: return '#fed7aa';
+              }
+            }
+            
+            // Check if this is a task node (contains "task" or other task indicators)
+            if (nodeName.toLowerCase().includes('task') || 
+                nodeName.toLowerCase().includes('evidence') ||
+                nodeName.toLowerCase().includes('investigation')) {
+              switch (status) {
+                case 'completed': return '#7dd3fc'; // sky-300
+                case 'in_progress': return '#38bdf8'; // sky-400
+                case 'failed': return '#ef4444';
+                case 'pending': return '#bae6fd'; // sky-200
+                default: return '#bae6fd';
+              }
+            }
+            
+            // Default colors for other node types
+            switch (status) {
+              case 'completed': return '#3b82f6';
+              case 'in_progress': return '#2563eb';
+              case 'failed': return '#ef4444';
+              case 'pending': return '#6b7280';
+              default: return '#6b7280';
+            }
+          }}
         />
-      </div>
+        <Background 
+          gap={20} 
+          size={1} 
+          color="#e2e8f0"
+        />
+      </ReactFlow>
     </div>
   );
 };

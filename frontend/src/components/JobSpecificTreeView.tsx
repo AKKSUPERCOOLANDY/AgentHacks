@@ -165,8 +165,8 @@ const JobSpecificTreeView: React.FC = () => {
   return (
     <div className="h-full flex flex-col">
       {/* Job Selection Header */}
-      <div className="bg-white border-b border-gray-200 p-4 flex-shrink-0">
-        <div className="max-w-4xl mx-auto">
+      <div className="bg-white p-4 flex-shrink-0">
+        <div className="max-w-4xl mx-auto relative">
           
           {jobHistory.length === 0 ? (
             <div className="text-center py-8">
@@ -227,14 +227,13 @@ const JobSpecificTreeView: React.FC = () => {
                         <p className="text-sm font-medium text-gray-900 truncate">
                           {job.name}
                         </p>
-                        <p className="text-xs text-gray-500">
-                          Completed {formatDate(job.completedAt)}
-                        </p>
                         <div className="flex items-center mt-1">
                           <span className={`inline-block w-2 h-2 rounded-full mr-2 ${
                             job.status === 'completed' ? 'bg-green-500' : 'bg-gray-400'
                           }`}></span>
-                          <span className="text-xs text-gray-500 capitalize">{job.status}</span>
+                          <p className="text-xs text-gray-500">
+                            {formatDate(job.completedAt)}
+                          </p>
                         </div>
                       </div>
                       {selectedJob === job.id && (
@@ -255,59 +254,19 @@ const JobSpecificTreeView: React.FC = () => {
                 </div>
               )}
 
-              {/* Selected Job Info */}
-              {selectedJob && selectedJobObject && (
-                <div className="bg-blue-50 rounded-lg p-4 flex items-center justify-between">
-                  <div className="flex items-center space-x-3">
-                    <div className="text-blue-600 text-xl">🌳</div>
-                    <div>
-                      <p className="text-sm font-medium text-blue-900">
-                        Viewing tree for: {selectedJobObject.name}
-                      </p>
-                      <p className="text-xs text-blue-600">
-                        Completed: {formatDate(selectedJobObject.completedAt)}
-                      </p>
-                      {lastUpdate && (
-                        <p className="text-xs text-blue-600">
-                          Last updated: {lastUpdate}
-                        </p>
-                      )}
+              {/* Tree Stats - positioned horizontally aligned with selected job */}
+              {treeStats && selectedJob && (
+                <div className="absolute right-0 top-20 bg-white border border-gray-200 rounded-lg p-3 shadow-sm">
+                  <div className="flex items-center space-x-4 text-sm text-gray-600">
+                    <div><span className="font-medium">{treeStats.total_nodes}</span> nodes</div>
+                    <div><span className="font-medium">{treeStats.max_depth}</span> levels deep</div>
+                    <div className="text-green-600 font-medium">
+                      {Object.entries(treeStats.nodes_by_status).find(([status]) => status === 'completed')?.[1] || 0} completed
                     </div>
                   </div>
-                  <button
-                    onClick={handleManualRefresh}
-                    disabled={isLoading}
-                    className="text-white px-3 py-1.5 rounded-lg text-sm font-medium transition-colors disabled:cursor-not-allowed flex items-center space-x-1"
-                    style={{ backgroundColor: isLoading ? '#9CA3AF' : '#56A3B1' }}
-                    onMouseEnter={e => !isLoading && ((e.target as HTMLElement).style.backgroundColor = '#3A6B80')}
-                    onMouseLeave={e => !isLoading && ((e.target as HTMLElement).style.backgroundColor = '#56A3B1')}
-                  >
-                    <span>{isLoading ? '⏳' : '🔄'}</span>
-                    <span>{isLoading ? 'Loading...' : 'Refresh'}</span>
-                  </button>
                 </div>
               )}
 
-              {/* Tree Stats */}
-              {treeStats && selectedJob && (
-                <div className="mt-4 flex items-center space-x-6 text-sm text-gray-600">
-                  <span>
-                    <span className="font-medium">{treeStats.total_nodes}</span> nodes
-                  </span>
-                  <span>
-                    <span className="font-medium">{treeStats.max_depth}</span> levels deep
-                  </span>
-                  <div className="flex items-center space-x-2">
-                    {Object.entries(treeStats.nodes_by_status).map(([status, count]) => (
-                      count > 0 && (
-                        <span key={status} className={`${getStatusColor(status)} font-medium`}>
-                          {count} {status}
-                        </span>
-                      )
-                    ))}
-                  </div>
-                </div>
-              )}
             </>
           )}
         </div>

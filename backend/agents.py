@@ -328,11 +328,11 @@ class PlannerAgent(BaseAgent):
                         if not self.conclusion_created:
                             await self._create_conclusion_task("No new productive tasks identified")
                             self.conclusion_created = True
-                else:
-                    logger.info("[PLANNER] 🏁 No new tasks - investigation complete")
-                    if not self.conclusion_created:
-                        await self._create_conclusion_task("Investigation analysis complete")
-                        self.conclusion_created = True
+            else:
+                logger.info("[PLANNER] 🏁 No new tasks - investigation complete")
+                if not self.conclusion_created:
+                    await self._create_conclusion_task("Investigation analysis complete")
+                    self.conclusion_created = True
             
         except Exception as e:
             logger.error(f"[PLANNER] Error refining plan: {e}")
@@ -397,31 +397,31 @@ class PlannerAgent(BaseAgent):
                         is_repetitive = True
                         break
             
-            # AGGRESSIVE shallow detection - expanded list
+            # IMPROVED shallow detection - only truly shallow terms
             shallow_indicators = [
-                'general', 'overall', 'broad', 'comprehensive', 'complete analysis',
-                'investigate', 'analyze', 'examine', 'review', 'assess', 'explore',
-                'determine', 'identify', 'find', 'check', 'look into'
+                'general overview', 'broad analysis', 'comprehensive review',
+                'overall assessment', 'complete investigation', 'full examination'
             ]
-            if any(indicator in desc for indicator in shallow_indicators):
-                is_shallow = True
+            # Check for actual shallow phrases, not individual investigative words
+            is_shallow = any(indicator in desc for indicator in shallow_indicators)
             
             # Check if task targets specific existing nodes (depth requirement)
             depth_requirement_indicators = [
                 'specific', 'detailed', 'sub-analysis', 'deeper', 'granular',
-                'cross-reference', 'correlate', 'connect', 'extend', 'build on'
+                'cross-reference', 'correlate', 'connect', 'extend', 'build on',
+                'analyze', 'examine', 'investigate', 'review'  # Allow core investigative terms
             ]
             has_depth_target = any(indicator in desc for indicator in depth_requirement_indicators)
             
             # Check if task mentions building on existing analysis
             builds_on_existing = 'builds_on' in task and task['builds_on']
             
-            # AGGRESSIVE: Require both depth indicators AND specific targeting
-            if not is_repetitive and not is_shallow and (has_depth_target or builds_on_existing):
+            # RELAXED: Allow tasks with depth indicators OR specific content OR being early in investigation
+            if not is_repetitive and not is_shallow and (has_depth_target or builds_on_existing or len(recent_tasks) < 3):
                 filtered.append(task)
             else:
                 reason = "repetitive" if is_repetitive else "shallow/lacks depth target" if is_shallow else "no depth indicators"
-                logger.info(f"[PLANNER] 🚫 AGGRESSIVE filter: {reason} task: {task['description']}")
+                logger.info(f"[PLANNER] 🚫 Filter: {reason} task: {task['description']}")
         
         # Additional aggressive filtering: prefer tasks that mention specific node types
         depth_priority_filtered = []
