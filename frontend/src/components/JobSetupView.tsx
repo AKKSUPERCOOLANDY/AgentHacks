@@ -45,13 +45,15 @@ const JobSetupView: React.FC = () => {
 
   // Poll for job completion
   useEffect(() => {
+    let jobAddedToHistory = false; // Flag to prevent duplicate job creation
+    
     if (jobStatus.status === 'running') {
       const pollInterval = setInterval(async () => {
         try {
           const response = await fetch(`${API_BASE}/api/analysis/summary`);
           if (response.ok) {
             const data = await response.json();
-            if (data.summary) {
+            if (data.summary && !jobAddedToHistory) {
               setJobSummary(data.summary);
               
               // Add completed job to history
@@ -65,6 +67,7 @@ const JobSetupView: React.FC = () => {
               
               setJobHistory(prev => [completedJob, ...prev]);
               setJobStatus({ status: 'completed', message: 'Job completed successfully!' });
+              jobAddedToHistory = true; // Mark as added
               clearInterval(pollInterval);
             }
           }
@@ -159,34 +162,24 @@ const JobSetupView: React.FC = () => {
           ) : (
             <>
               {/* Job Name Input */}
-              <div className="bg-gray-50 rounded-lg p-6 border border-gray-200 mb-6">
-                <h3 className="text-lg font-semibold text-gray-800 mb-4">Job Name</h3>
+              <div className="bg-gray-50 rounded-lg p-6 border border-gray-200 mb-4">
                 <input
                   type="text"
                   value={jobName}
                   onChange={(e) => setJobName(e.target.value)}
-                  placeholder="Enter a name for this job..."
+                  placeholder="Job name"
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
                 />
-                <p className="text-sm text-gray-500 mt-2">
-                  Give your job a descriptive name to help identify it later
-                </p>
               </div>
 
               {/* Control buttons */}
               <div className="flex items-center justify-between mb-6">
                 <div className="flex items-center space-x-4">
                   <button
-                    onClick={selectAll}
+                    onClick={selectedFiles.length === availableFiles.length ? clearSelection : selectAll}
                     className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
                   >
-                    Select All ({availableFiles.length})
-                  </button>
-                  <button
-                    onClick={clearSelection}
-                    className="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-                  >
-                    Clear Selection
+                    {selectedFiles.length === availableFiles.length ? 'Clear All' : 'Select All'}
                   </button>
                   <button
                     onClick={startJob}
@@ -197,11 +190,9 @@ const JobSetupView: React.FC = () => {
                     <span>
                       {jobStatus.status === 'running' 
                         ? 'Running...' 
-                        : selectedFiles.length === 0
-                          ? 'Select files'
-                          : !jobName.trim()
-                            ? 'Enter job name'
-                            : `Run Job (${selectedFiles.length} files)`
+                        : selectedFiles.length === 0 || !jobName.trim()
+                          ? 'Run'
+                          : `Run Job (${selectedFiles.length} files)`
                       }
                     </span>
                     {jobStatus.status === 'running' && (
@@ -211,13 +202,12 @@ const JobSetupView: React.FC = () => {
                 </div>
                 
                 <div className="text-sm text-gray-600">
-                  {selectedFiles.length} of {availableFiles.length} files selected
+                  {selectedFiles.length} selected
                 </div>
               </div>
 
               {/* File Search */}
               <div className="bg-gray-50 rounded-lg p-6 border border-gray-200 mb-6">
-                <h3 className="text-lg font-semibold text-gray-800 mb-4">Search Files</h3>
                 <div className="relative mb-4">
                   <input
                     type="text"

@@ -229,11 +229,6 @@ const FileManagerView: React.FC = () => {
         <div className="p-6">
           {uploadedFiles.length > 0 && (
             <>
-              <div className="text-center mb-8">
-                <h2 className="text-2xl font-bold text-gray-800 mb-2">File Manager</h2>
-                <p className="text-gray-600">Upload and manage your case files</p>
-              </div>
-
               {/* Action Buttons */}
               <div className="flex items-center justify-center space-x-4 mb-8">
                 <button
@@ -254,9 +249,6 @@ const FileManagerView: React.FC = () => {
           {/* Files List */}
           {uploadedFiles.length > 0 && (
             <div className="bg-gray-50 rounded-lg p-6 border border-gray-200">
-              <h2 className="text-2xl font-semibold text-gray-800 mb-6">
-                Uploaded Files ({uploadedFiles.length})
-              </h2>
               <div className="space-y-3">
                 {uploadedFiles.map((file) => (
                   <div
@@ -283,11 +275,6 @@ const FileManagerView: React.FC = () => {
                               {getDisplayName(file.name)}
                             </p>
                           )}
-                          {file.uploaded ? (
-                            <span className="text-green-600 text-xs">✅ Uploaded</span>
-                          ) : (
-                            <span className="text-orange-600 text-xs">⏳ Uploading...</span>
-                          )}
                         </div>
                         <p className="text-sm text-gray-500">
                           {(file.size / 1024).toFixed(2)} KB
@@ -295,39 +282,47 @@ const FileManagerView: React.FC = () => {
                       </div>
                     </div>
                     
-                    {/* Three dots menu */}
+                    {/* Loading animation or menu */}
                     <div className="relative">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setActiveDropdown(activeDropdown === file.id ? null : file.id);
-                          setContextMenu(null);
-                        }}
-                        className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors"
-                      >
-                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                          <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
-                        </svg>
-                      </button>
-                      
-                      {/* Dropdown menu */}
-                      {activeDropdown === file.id && (
-                        <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-[100] min-w-[120px]">
-                          <button
-                            onClick={() => handleRename(file.id, file.name)}
-                            className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-700 flex items-center space-x-2 transition-colors first:rounded-t-lg"
-                          >
-                            <span>✏️</span>
-                            <span>Rename</span>
-                          </button>
-                          <button
-                            onClick={() => handleDelete(file.id, file.name)}
-                            className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-red-50 hover:text-red-700 flex items-center space-x-2 transition-colors last:rounded-b-lg"
-                          >
-                            <span>🗑️</span>
-                            <span>Delete</span>
-                          </button>
+                      {!file.uploaded ? (
+                        <div className="p-2">
+                          <div className="animate-spin w-4 h-4 border-2 border-gray-300 border-t-blue-500 rounded-full"></div>
                         </div>
+                      ) : (
+                        <>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setActiveDropdown(activeDropdown === file.id ? null : file.id);
+                              setContextMenu(null);
+                            }}
+                            className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors"
+                          >
+                            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                              <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
+                            </svg>
+                          </button>
+                          
+                          {/* Dropdown menu */}
+                          {activeDropdown === file.id && (
+                            <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-[100] min-w-[120px]">
+                              <button
+                                onClick={() => handleRename(file.id, file.name)}
+                                className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-700 flex items-center space-x-2 transition-colors first:rounded-t-lg"
+                              >
+                                <span>✏️</span>
+                                <span>Rename</span>
+                              </button>
+                              <button
+                                onClick={() => handleDelete(file.id, file.name)}
+                                className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-red-50 hover:text-red-700 flex items-center space-x-2 transition-colors last:rounded-b-lg"
+                              >
+                                <span>🗑️</span>
+                                <span>Delete</span>
+                              </button>
+                            </div>
+                          )}
+                        </>
                       )}
                     </div>
                   </div>

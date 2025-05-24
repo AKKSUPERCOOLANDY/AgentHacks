@@ -473,6 +473,85 @@ async def get_node(node_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error retrieving node: {str(e)}")
 
+@app.get("/api/tree/job/{job_id}")
+async def get_job_tree(job_id: str):
+    """Get memory tree specific to a job"""
+    try:
+        if not memory_tree or not memory_tree.root_id:
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "data": None,
+                    "message": f"No tree data available for job: {job_id}"
+                }
+            )
+        
+        # For now, we'll return the global tree since jobs aren't yet stored separately
+        # In the future, this could be enhanced to store job-specific trees
+        root_node = memory_tree.get_node(memory_tree.root_id)
+        if not root_node:
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "data": None,
+                    "message": f"Root node not found for job: {job_id}"
+                }
+            )
+        
+        # For job-specific filtering, we could filter by creation time or job metadata
+        # For now, we'll return the full tree as it represents the most recent job
+        tree_data = convert_node_to_dict(root_node)
+        
+        return JSONResponse(
+            status_code=200,
+            content={
+                "data": tree_data,
+                "message": f"Job-specific tree data retrieved successfully for job: {job_id}"
+            }
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error retrieving job tree: {str(e)}")
+
+@app.get("/api/tree/job/{job_id}/stats")
+async def get_job_tree_stats(job_id: str):
+    """Get tree statistics specific to a job"""
+    try:
+        if not memory_tree:
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "data": {
+                        "total_nodes": 0,
+                        "max_depth": 0,
+                        "nodes_by_status": {}
+                    },
+                    "message": f"No tree data available for job: {job_id}"
+                }
+            )
+        
+        # Get global tree stats for now - could be enhanced for job-specific stats
+        stats = memory_tree.get_tree_statistics()
+        
+        # Add job metadata
+        stats["job_id"] = job_id
+        
+        # Also get task queue stats if available
+        if task_queue:
+            task_stats = task_queue.get_queue_statistics()
+            stats["task_stats"] = task_stats
+        
+        return JSONResponse(
+            status_code=200,
+            content={
+                "data": stats,
+                "message": f"Job-specific statistics retrieved successfully for job: {job_id}"
+            }
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error retrieving job stats: {str(e)}")
+
 @app.get("/api/tasks")
 async def get_tasks():
     """Get task queue information"""
