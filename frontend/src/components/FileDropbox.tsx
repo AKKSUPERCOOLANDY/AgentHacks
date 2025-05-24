@@ -38,11 +38,33 @@ interface AnalysisSummary {
 }
 
 const FileDropbox: React.FC = () => {
-  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  // Load initial state from localStorage
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>(() => {
+    try {
+      const saved = localStorage.getItem('uploadedFiles');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
   const [isDragOver, setIsDragOver] = useState(false);
-  const [analysisStatus, setAnalysisStatus] = useState<AnalysisStatus>({ status: 'idle' });
+  const [analysisStatus, setAnalysisStatus] = useState<AnalysisStatus>(() => {
+    try {
+      const saved = localStorage.getItem('analysisStatus');
+      return saved ? JSON.parse(saved) : { status: 'idle' };
+    } catch {
+      return { status: 'idle' };
+    }
+  });
   const [uploading, setUploading] = useState(false);
-  const [analysisSummary, setAnalysisSummary] = useState<AnalysisSummary | null>(null);
+  const [analysisSummary, setAnalysisSummary] = useState<AnalysisSummary | null>(() => {
+    try {
+      const saved = localStorage.getItem('analysisSummary');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
   const fileInputRef = useRef<HTMLInputElement>(null);
   const API_BASE = 'http://localhost:8000';
 

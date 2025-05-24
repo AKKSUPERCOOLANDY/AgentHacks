@@ -11,6 +11,7 @@ from typing import Dict, List, Any, Optional
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 import uvicorn
 import json
 import asyncio
@@ -27,6 +28,9 @@ from tree import MemoryTree, MemoryNode, NodeStatus
 from tasklist import TaskQueue
 from gemini_client import GeminiClient
 from main_document_analysis import DocumentAnalysisSystem
+
+class AnalysisRequest(BaseModel):
+    selected_files: List[str] = []
 
 app = FastAPI(
     title="AI Agent Memory Tree API",
@@ -757,8 +761,8 @@ async def delete_case_file(filename: str):
         raise HTTPException(status_code=500, detail=f"Error deleting file: {str(e)}")
 
 @app.post("/api/analysis/start")
-async def start_document_analysis():
-    """Start document analysis on uploaded case files"""
+async def start_document_analysis(request: Optional[AnalysisRequest] = None):
+    """Start document analysis on selected case files"""
     global analysis_system, analysis_running, current_session_files
     
     try:
@@ -768,25 +772,45 @@ async def start_document_analysis():
                 content={"message": "Analysis is already running", "status": "running"}
             )
         
-        # Check if session files exist
-        if not current_session_files:
-            raise HTTPException(
-                status_code=400, 
-                detail="No files uploaded in current session. Please upload .txt files first."
-            )
+        # Determine which files to analyze
+        if request and request.selected_files:
+            # Use selected files from request
+            selected_files = request.selected_files
+            if not selected_files:
+                raise HTTPException(
+                    status_code=400, 
+                    detail="No files selected for analysis"
+                )
+        else:
+            # Fall back to session files if no selection provided
+            if not current_session_files:
+                # If no session files, use all available files in case_files directory
+                case_files_dir = Path("case_files")
+                all_files = list(case_files_dir.glob("*.txt"))
+                if not all_files:
+                    raise HTTPException(
+                        status_code=400, 
+                        detail="No .txt files found in case_files directory"
+                    )
+                selected_files = [f.name for f in all_files]
+            else:
+                selected_files = current_session_files
             
-        # Verify the session files actually exist
+        # Verify the selected files actually exist
         case_files_dir = Path("case_files")
         missing_files = []
-        for filename in current_session_files:
+        for filename in selected_files:
             if not (case_files_dir / filename).exists():
                 missing_files.append(filename)
         
         if missing_files:
             raise HTTPException(
                 status_code=400,
-                detail=f"Session files not found: {missing_files}"
+                detail=f"Selected files not found: {missing_files}"
             )
+        
+        # Update session files to selected files
+        current_session_files = selected_files
         
         # Check for GEMINI_API_KEY
         if not os.getenv("GEMINI_API_KEY"):
@@ -796,7 +820,7 @@ async def start_document_analysis():
             )
         
         logger.info("🔬 Starting document analysis...")
-        logger.info(f"📋 Analyzing session files: {current_session_files}")
+        logger.info(f"📋 Analyzing selected files: {selected_files}")
         analysis_running = True
         
         # Initialize and start the analysis system with session-specific files
