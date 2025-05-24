@@ -120,12 +120,10 @@ const ResultsView: React.FC = () => {
   if (loading) {
     return (
       <div className="h-full p-6">
-        <div className="h-full bg-white/40 backdrop-blur-sm rounded-xl border border-white/30 shadow-lg overflow-auto">
-          <div className="flex items-center justify-center h-full">
+        <div className="flex items-center justify-center h-full">
             <div className="animate-spin w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full"></div>
             <span className="ml-3 text-gray-600">Loading results...</span>
           </div>
-        </div>
       </div>
     );
   }
@@ -134,8 +132,6 @@ const ResultsView: React.FC = () => {
   if (selectedJob) {
     return (
       <div className="h-full p-6">
-        <div className="h-full bg-white/40 backdrop-blur-sm rounded-xl border border-white/30 shadow-lg overflow-auto">
-          <div className="p-6">
             {/* Header with back button */}
             <div className="flex items-center mb-8">
               <button
@@ -155,9 +151,11 @@ const ResultsView: React.FC = () => {
             {selectedJob.summary && (
               <div className="space-y-6">
                 {/* Summary Metrics */}
-                <div className="bg-white/80 backdrop-blur-sm rounded-xl shadow-lg p-6 border border-white/30">
+                <div className="bg-gray-50 rounded-lg p-6">
                   <div className="flex items-center space-x-3 mb-4">
-                    <span className="text-2xl">📊</span>
+                    <svg className="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                    </svg>
                     <h3 className="text-xl font-bold text-gray-800">Summary</h3>
                   </div>
                   
@@ -198,7 +196,9 @@ const ResultsView: React.FC = () => {
                 {selectedJob.summary.key_findings && selectedJob.summary.key_findings.length > 0 && (
                   <div className="bg-white/80 backdrop-blur-sm rounded-xl shadow-lg p-6 border border-white/30">
                     <div className="flex items-center space-x-3 mb-4">
-                      <span className="text-2xl">🔍</span>
+                      <svg className="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                      </svg>
                       <h3 className="text-xl font-bold text-gray-800">Key Findings</h3>
                     </div>
                     <div className="space-y-3">
@@ -215,7 +215,9 @@ const ResultsView: React.FC = () => {
                 {selectedJob.summary.evidence_summary && selectedJob.summary.evidence_summary.length > 0 && (
                   <div className="bg-white/80 backdrop-blur-sm rounded-xl shadow-lg p-6 border border-white/30">
                     <div className="flex items-center space-x-3 mb-4">
-                      <span className="text-2xl">📋</span>
+                      <svg className="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                      </svg>
                       <h3 className="text-xl font-bold text-gray-800">Evidence Summary</h3>
                     </div>
                     <div className="space-y-3">
@@ -233,7 +235,9 @@ const ResultsView: React.FC = () => {
                 {selectedJob.summary.conclusion && (
                   <div className="bg-white/80 backdrop-blur-sm rounded-xl shadow-lg p-6 border border-white/30">
                     <div className="flex items-center space-x-3 mb-4">
-                      <span className="text-2xl">🎯</span>
+                      <svg className="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
+                      </svg>
                       <h3 className="text-xl font-bold text-gray-800">Conclusion</h3>
                     </div>
                     <p className="text-gray-700 leading-relaxed">{selectedJob.summary.conclusion}</p>
@@ -245,8 +249,6 @@ const ResultsView: React.FC = () => {
                 )}
               </div>
             )}
-          </div>
-        </div>
       </div>
     );
   }
@@ -254,11 +256,9 @@ const ResultsView: React.FC = () => {
   // Show job history list
   return (
     <div className="h-full p-6">
-      <div className="h-full bg-white/40 backdrop-blur-sm rounded-xl border border-white/30 shadow-lg overflow-auto">
-        <div className="p-6">
           {/* Running job status */}
           {jobStatus.status === 'running' && (
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+            <div className="bg-blue-50 rounded-lg p-4 mb-6">
               <div className="flex items-center">
                 <div className="animate-spin w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full mr-3"></div>
                 <div>
@@ -287,7 +287,15 @@ const ResultsView: React.FC = () => {
                       onClick={() => handleJobClick(job)}
                     >
                       <div className="text-2xl">
-                        {job.status === 'completed' ? '📊' : '❌'}
+                        {job.status === 'completed' ? (
+                          <svg className="w-8 h-8 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                          </svg>
+                        ) : (
+                          <svg className="w-8 h-8 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        )}
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center space-x-2">
@@ -335,7 +343,9 @@ const ResultsView: React.FC = () => {
             </div>
           ) : jobStatus.status === 'running' ? null : (
             <div className="flex flex-col items-center justify-center h-96">
-              <div className="text-8xl mb-6">📊</div>
+              <svg className="w-24 h-24 text-gray-300 mb-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+              </svg>
               <h3 className="text-2xl font-bold text-gray-800 mb-4">No Jobs Completed</h3>
               <p className="text-gray-600 text-center mb-8 max-w-md">
                 Complete jobs to see results here
@@ -344,15 +354,18 @@ const ResultsView: React.FC = () => {
                 onClick={() => {
                   window.dispatchEvent(new CustomEvent('switchTab', { detail: 'analysis' }));
                 }}
-                className="bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white font-medium py-4 px-8 rounded-lg transition-colors duration-200 shadow-lg hover:shadow-xl flex items-center justify-center space-x-3 text-lg min-w-[280px] h-[60px]"
+                className="text-white font-medium py-4 px-8 rounded-lg transition-colors duration-200 shadow-lg hover:shadow-xl flex items-center justify-center space-x-3 text-lg min-w-[280px] h-[60px]"
+                style={{ backgroundColor: '#56A3B1' }}
+                onMouseEnter={e => (e.target as HTMLElement).style.backgroundColor = '#3A6B80'}
+                onMouseLeave={e => (e.target as HTMLElement).style.backgroundColor = '#56A3B1'}
               >
-                <span>🔬</span>
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                </svg>
                 <span>Create New Job</span>
               </button>
             </div>
           )}
-        </div>
-      </div>
     </div>
   );
 };

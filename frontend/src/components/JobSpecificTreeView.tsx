@@ -170,14 +170,19 @@ const JobSpecificTreeView: React.FC = () => {
           
           {jobHistory.length === 0 ? (
             <div className="text-center py-8">
-              <div className="text-4xl mb-4">🔬</div>
+              <svg className="w-16 h-16 text-gray-300 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+              </svg>
               <h3 className="text-lg font-medium text-gray-900 mb-2">No Completed Jobs</h3>
               <p className="text-gray-600 mb-4">Run a job to view its analysis tree</p>
               <button
                 onClick={() => {
                   window.dispatchEvent(new CustomEvent('switchTab', { detail: 'analysis' }));
                 }}
-                className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition-colors duration-200"
+                className="text-white font-medium py-2 px-4 rounded-lg transition-colors duration-200"
+                style={{ backgroundColor: '#56A3B1' }}
+                onMouseEnter={e => (e.target as HTMLElement).style.backgroundColor = '#3A6B80'}
+                onMouseLeave={e => (e.target as HTMLElement).style.backgroundColor = '#56A3B1'}
               >
                 Create Job
               </button>
@@ -215,7 +220,9 @@ const JobSpecificTreeView: React.FC = () => {
                     }`}
                   >
                     <div className="flex items-center space-x-3">
-                      <div className="text-2xl">🔬</div>
+                      <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                      </svg>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium text-gray-900 truncate">
                           {job.name}
@@ -270,7 +277,10 @@ const JobSpecificTreeView: React.FC = () => {
                   <button
                     onClick={handleManualRefresh}
                     disabled={isLoading}
-                    className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-3 py-1.5 rounded-lg text-sm font-medium transition-colors disabled:cursor-not-allowed flex items-center space-x-1"
+                    className="text-white px-3 py-1.5 rounded-lg text-sm font-medium transition-colors disabled:cursor-not-allowed flex items-center space-x-1"
+                    style={{ backgroundColor: isLoading ? '#9CA3AF' : '#56A3B1' }}
+                    onMouseEnter={e => !isLoading && ((e.target as HTMLElement).style.backgroundColor = '#3A6B80')}
+                    onMouseLeave={e => !isLoading && ((e.target as HTMLElement).style.backgroundColor = '#56A3B1')}
                   >
                     <span>{isLoading ? '⏳' : '🔄'}</span>
                     <span>{isLoading ? 'Loading...' : 'Refresh'}</span>
@@ -330,7 +340,10 @@ const JobSpecificTreeView: React.FC = () => {
               <p className="text-red-600 mb-4">{error}</p>
               <button
                 onClick={handleManualRefresh}
-                className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors font-medium"
+                className="text-white px-4 py-2 rounded-lg transition-colors font-medium"
+                style={{ backgroundColor: '#ef4444' }}
+                onMouseEnter={e => (e.target as HTMLElement).style.backgroundColor = '#dc2626'}
+                onMouseLeave={e => (e.target as HTMLElement).style.backgroundColor = '#ef4444'}
               >
                 🔄 Try Again
               </button>
@@ -349,7 +362,10 @@ const JobSpecificTreeView: React.FC = () => {
                 onClick={() => {
                   window.dispatchEvent(new CustomEvent('switchTab', { detail: 'results' }));
                 }}
-                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors font-medium"
+                className="text-white px-4 py-2 rounded-lg transition-colors font-medium"
+                style={{ backgroundColor: '#56A3B1' }}
+                onMouseEnter={e => (e.target as HTMLElement).style.backgroundColor = '#3A6B80'}
+                onMouseLeave={e => (e.target as HTMLElement).style.backgroundColor = '#56A3B1'}
               >
                 View Results
               </button>

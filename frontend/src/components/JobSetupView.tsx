@@ -140,11 +140,11 @@ const JobSetupView: React.FC = () => {
 
   return (
     <div className="h-full p-6">
-      <div className="h-full bg-white rounded-lg border border-gray-200 overflow-auto">
-        <div className="p-6">
           {availableFiles.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-96">
-              <div className="text-8xl mb-6">📄</div>
+              <svg className="w-24 h-24 text-gray-300 mb-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
               <h3 className="text-2xl font-bold text-gray-800 mb-4">No Files Available</h3>
               <p className="text-gray-600 text-center mb-8 max-w-md">
                 You need to upload case files before creating a job
@@ -153,16 +153,21 @@ const JobSetupView: React.FC = () => {
                 onClick={() => {
                   window.dispatchEvent(new CustomEvent('switchTab', { detail: 'files' }));
                 }}
-                className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-6 rounded-lg transition-colors duration-200 shadow-sm hover:shadow-md flex items-center space-x-2 mx-auto"
+                className="text-white font-medium py-3 px-6 rounded-lg transition-colors duration-200 shadow-sm hover:shadow-md flex items-center space-x-2 mx-auto"
+                style={{ backgroundColor: '#56A3B1' }}
+                onMouseEnter={e => (e.target as HTMLElement).style.backgroundColor = '#3A6B80'}
+                onMouseLeave={e => (e.target as HTMLElement).style.backgroundColor = '#56A3B1'}
               >
-                <span>📁</span>
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                </svg>
                 <span>Go to File Manager</span>
               </button>
             </div>
           ) : (
             <>
               {/* Job Name Input */}
-              <div className="bg-gray-50 rounded-lg p-6 border border-gray-200 mb-4">
+              <div className="mb-4">
                 <input
                   type="text"
                   value={jobName}
@@ -177,16 +182,34 @@ const JobSetupView: React.FC = () => {
                 <div className="flex items-center space-x-4">
                   <button
                     onClick={selectedFiles.length === availableFiles.length ? clearSelection : selectAll}
-                    className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                    className="text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                    style={{ backgroundColor: '#56A3B1' }}
+                    onMouseEnter={e => (e.target as HTMLElement).style.backgroundColor = '#3A6B80'}
+                    onMouseLeave={e => (e.target as HTMLElement).style.backgroundColor = '#56A3B1'}
                   >
                     {selectedFiles.length === availableFiles.length ? 'Clear All' : 'Select All'}
                   </button>
                   <button
                     onClick={startJob}
                     disabled={selectedFiles.length === 0 || !jobName.trim() || jobStatus.status === 'running'}
-                    className="bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white px-6 py-2 rounded-lg text-sm font-medium transition-colors disabled:cursor-not-allowed flex items-center space-x-2"
+                    className="text-white px-6 py-2 rounded-lg text-sm font-medium transition-colors disabled:cursor-not-allowed flex items-center space-x-2"
+                    style={{ 
+                      backgroundColor: selectedFiles.length === 0 || !jobName.trim() || jobStatus.status === 'running' ? '#9CA3AF' : '#56A3B1'
+                    }}
+                    onMouseEnter={e => {
+                      if (!(selectedFiles.length === 0 || !jobName.trim() || jobStatus.status === 'running')) {
+                        (e.target as HTMLElement).style.backgroundColor = '#3A6B80';
+                      }
+                    }}
+                    onMouseLeave={e => {
+                      if (!(selectedFiles.length === 0 || !jobName.trim() || jobStatus.status === 'running')) {
+                        (e.target as HTMLElement).style.backgroundColor = '#56A3B1';
+                      }
+                    }}
                   >
-                    <span>🔬</span>
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                    </svg>
                     <span>
                       {jobStatus.status === 'running' 
                         ? 'Running...' 
@@ -207,7 +230,7 @@ const JobSetupView: React.FC = () => {
               </div>
 
               {/* File Search */}
-              <div className="bg-gray-50 rounded-lg p-6 border border-gray-200 mb-6">
+              <div className="mb-6">
                 <div className="relative mb-4">
                   <input
                     type="text"
@@ -230,27 +253,34 @@ const JobSetupView: React.FC = () => {
                       filteredFiles.map((file) => (
                         <div
                           key={file.name}
-                          className={`flex items-center p-3 rounded-lg border cursor-pointer transition-all duration-200 ${
+                          className={`flex items-center p-3 rounded-lg cursor-pointer transition-all duration-200 ${
                             selectedFiles.includes(file.name)
-                              ? 'bg-blue-50 border-blue-300'
-                              : 'bg-white border-gray-200 hover:bg-gray-50'
+                              ? ''
+                              : 'hover:bg-gray-50'
                           }`}
+                          style={selectedFiles.includes(file.name) ? { backgroundColor: '#7ECEF4' } : {}}
                           onClick={() => toggleFileSelection(file.name)}
                         >
                           <div className="flex items-center space-x-3 flex-1">
                             <div className={`w-5 h-5 rounded border-2 flex items-center justify-center ${
                               selectedFiles.includes(file.name)
-                                ? 'bg-blue-500 border-blue-500'
+                                ? ''
                                 : 'border-gray-300'
-                            }`}>
+                            }`}
+                            style={selectedFiles.includes(file.name) ? {
+                              backgroundColor: '#56A3B1',
+                              borderColor: '#56A3B1'
+                            } : {}}>
                               {selectedFiles.includes(file.name) && (
                                 <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
                                   <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                                 </svg>
                               )}
                             </div>
-                            <div className="text-xl">📝</div>
-                            <div className="flex-1 min-w-0">
+                                                          <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                              </svg>
+                              <div className="flex-1 min-w-0">
                               <p className="text-sm font-medium text-gray-900 truncate">
                                 {getDisplayName(file.name)}
                               </p>
@@ -280,26 +310,33 @@ const JobSetupView: React.FC = () => {
                         recentFiles.map((file) => (
                           <div
                             key={file.name}
-                            className={`flex items-center p-3 rounded-lg border cursor-pointer transition-all duration-200 ${
+                            className={`flex items-center p-3 rounded-lg cursor-pointer transition-all duration-200 ${
                               selectedFiles.includes(file.name)
-                                ? 'bg-blue-50 border-blue-300'
-                                : 'bg-white border-gray-200 hover:bg-gray-50'
+                                ? ''
+                                : 'hover:bg-gray-50'
                             }`}
+                            style={selectedFiles.includes(file.name) ? { backgroundColor: '#7ECEF4' } : {}}
                             onClick={() => toggleFileSelection(file.name)}
                           >
                             <div className="flex items-center space-x-3 flex-1">
                               <div className={`w-5 h-5 rounded border-2 flex items-center justify-center ${
                                 selectedFiles.includes(file.name)
-                                  ? 'bg-blue-500 border-blue-500'
+                                  ? ''
                                   : 'border-gray-300'
-                              }`}>
+                              }`}
+                              style={selectedFiles.includes(file.name) ? {
+                                backgroundColor: '#56A3B1',
+                                borderColor: '#56A3B1'
+                              } : {}}>
                                 {selectedFiles.includes(file.name) && (
                                   <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
                                     <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                                   </svg>
                                 )}
                               </div>
-                              <div className="text-xl">📝</div>
+                              <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                              </svg>
                               <div className="flex-1 min-w-0">
                                 <p className="text-sm font-medium text-gray-900 truncate">
                                   {getDisplayName(file.name)}
@@ -313,7 +350,9 @@ const JobSetupView: React.FC = () => {
                         ))
                       ) : (
                         <div className="text-center py-8 text-gray-500">
-                          <div className="text-4xl mb-2">📁</div>
+                          <svg className="w-12 h-12 text-gray-300 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                          </svg>
                           <p>No files uploaded yet</p>
                         </div>
                       )}
@@ -335,7 +374,7 @@ const JobSetupView: React.FC = () => {
 
               {/* Job status */}
               {jobStatus.status !== 'idle' && (
-                <div className="mt-6 bg-gray-50 rounded-lg p-4 border border-gray-200">
+                <div className="mt-6 bg-gray-50 rounded-lg p-4">
                   <div className="flex items-center space-x-3">
                     {jobStatus.status === 'running' && (
                       <>
@@ -360,8 +399,6 @@ const JobSetupView: React.FC = () => {
               )}
             </>
           )}
-        </div>
-      </div>
     </div>
   );
 };

@@ -1,20 +1,17 @@
-import React, { useRef, useState } from 'react';
+import React, { useState } from 'react';
 import { useAppContext } from '../contexts/AppContext';
-import type { UploadedFile } from '../contexts/AppContext';
 
 const FileManagerView: React.FC = () => {
-  const { uploadedFiles, setUploadedFiles, uploading, setUploading, setJobStatus } = useAppContext();
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const API_BASE = 'http://localhost:8000';
+  const { uploadedFiles, setUploadedFiles, uploading } = useAppContext();
 
   // Load existing files on mount
   React.useEffect(() => {
     const loadExistingFiles = async () => {
       try {
-        const response = await fetch(`${API_BASE}/api/files`);
+        const response = await fetch('http://localhost:8000/api/files');
         if (response.ok) {
           const data = await response.json();
-          const existingFiles: UploadedFile[] = data.files.map((file: any) => ({
+          const existingFiles = data.files.map((file: any) => ({
             id: Math.random().toString(36).substring(7),
             name: file.filename,
             size: file.size,
@@ -33,13 +30,14 @@ const FileManagerView: React.FC = () => {
     if (uploadedFiles.length === 0) {
       loadExistingFiles();
     }
-  }, []);
+  }, [uploadedFiles.length, setUploadedFiles]);
   
   // File management state
   const [contextMenu, setContextMenu] = useState<{ fileId: string; x: number; y: number } | null>(null);
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
   const [editingFile, setEditingFile] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
 
   // Helper function to remove .txt extension for display
   const getDisplayName = (fileName: string) => {
@@ -59,64 +57,12 @@ const FileManagerView: React.FC = () => {
     );
   };
 
-  const handleUploadClick = () => {
-    fileInputRef.current?.click();
-  };
+  // Filter files based on search term
+  const filteredFiles = uploadedFiles.filter(file => 
+    getDisplayName(file.name).toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
-  const uploadFiles = async (files: File[]) => {
-    setUploading(true);
-    
-    try {
-      // Create uploaded file objects for UI
-      const newFiles: UploadedFile[] = files.map((file) => ({
-        id: Math.random().toString(36).substring(7),
-        name: file.name,
-        size: file.size,
-        type: file.type,
-        url: URL.createObjectURL(file),
-        uploaded: false,
-      }));
 
-      setUploadedFiles((prev) => [...prev, ...newFiles]);
-      
-      // Upload files one by one
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        const fileId = newFiles[i].id;
-        
-        const formData = new FormData();
-        formData.append('file', file);
-        
-        const response = await fetch(`${API_BASE}/api/upload`, {
-          method: 'POST',
-          body: formData,
-        });
-        
-        if (response.ok) {
-          // Mark this specific file as uploaded using ID
-          setUploadedFiles((prev) => 
-            prev.map((f) => 
-              f.id === fileId ? { ...f, uploaded: true } : f
-            )
-          );
-        } else {
-          throw new Error(`Failed to upload ${file.name}`);
-        }
-      }
-    } catch (error) {
-      console.error('Upload error:', error);
-      setJobStatus({ status: 'error', message: `Upload failed: ${error}` });
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
-    if (files.length > 0) {
-      uploadFiles(files);
-    }
-  };
 
   // File management functions
   const handleRightClick = (e: React.MouseEvent, fileId: string) => {
@@ -144,7 +90,7 @@ const FileManagerView: React.FC = () => {
 
     try {
       // Delete from server
-      const response = await fetch(`${API_BASE}/api/files/${fileName}`, {
+      const response = await fetch(`http://localhost:8000/api/files/${fileName}`, {
         method: 'DELETE',
       });
 
@@ -212,52 +158,53 @@ const FileManagerView: React.FC = () => {
 
   return (
     <div className="h-full p-6">
-      <div className="h-full bg-white rounded-lg border border-gray-200 overflow-auto">
-        {/* Hidden file input */}
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          accept=".txt"
-          onChange={handleFileInputChange}
-          disabled={uploading}
-          className="hidden"
-          id="file-upload-input"
-        />
-        
-        {/* File Manager View */}
-        <div className="p-6">
+          {/* File Search */}
           {uploadedFiles.length > 0 && (
-            <>
-              {/* Action Buttons */}
-              <div className="flex items-center justify-center space-x-4 mb-8">
-                <button
-                  onClick={handleUploadClick}
-                  disabled={uploading}
-                  className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-medium py-3 px-6 rounded-lg transition-colors duration-200 shadow-sm hover:shadow-md disabled:cursor-not-allowed flex items-center justify-center space-x-2 min-w-[180px] h-[48px]"
-                >
-                  <span>📁</span>
-                  <span>Upload More Files</span>
-                  {uploading && (
-                    <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full"></div>
-                  )}
-                </button>
+            <div className="mb-6">
+              <div className="relative">
+                <input
+                  type="text"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="Search files..."
+                  className="w-full px-4 py-3 pl-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                />
+                <div className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                </div>
               </div>
-            </>
+              {searchTerm && (
+                <p className="text-sm text-gray-500 mt-2">
+                  {filteredFiles.length} of {uploadedFiles.length} files match "{searchTerm}"
+                </p>
+              )}
+            </div>
           )}
 
           {/* Files List */}
           {uploadedFiles.length > 0 && (
-            <div className="bg-gray-50 rounded-lg p-6 border border-gray-200">
-              <div className="space-y-3">
-                {uploadedFiles.map((file) => (
+            <div>
+              {searchTerm && filteredFiles.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">
+                  <svg className="w-12 h-12 text-gray-300 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                  <p>No files found matching "{searchTerm}"</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {(searchTerm ? filteredFiles : uploadedFiles).map((file) => (
                   <div
                     key={file.id}
-                    className="relative flex items-center justify-between p-4 bg-white rounded-lg hover:bg-gray-50 transition-all duration-200 border border-gray-200"
+                    className="relative flex items-center justify-between p-3 hover:bg-gray-50 transition-all duration-200 rounded-lg"
                     onContextMenu={(e) => handleRightClick(e, file.id)}
                   >
                     <div className="flex items-center space-x-4 flex-1 min-w-0">
-                      <div className="text-2xl">📝</div>
+                      <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center space-x-2">
                           {editingFile === file.id ? (
@@ -310,14 +257,18 @@ const FileManagerView: React.FC = () => {
                                 onClick={() => handleRename(file.id, file.name)}
                                 className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-700 flex items-center space-x-2 transition-colors first:rounded-t-lg"
                               >
-                                <span>✏️</span>
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                </svg>
                                 <span>Rename</span>
                               </button>
                               <button
                                 onClick={() => handleDelete(file.id, file.name)}
                                 className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-red-50 hover:text-red-700 flex items-center space-x-2 transition-colors last:rounded-b-lg"
                               >
-                                <span>🗑️</span>
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                </svg>
                                 <span>Delete</span>
                               </button>
                             </div>
@@ -326,36 +277,66 @@ const FileManagerView: React.FC = () => {
                       )}
                     </div>
                   </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
           {/* Empty State - replaces everything when no files */}
           {uploadedFiles.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-96">
-              <div className="text-8xl mb-6">📁</div>
-              <h3 className="text-2xl font-bold text-gray-800 mb-4">Upload Your Case Files</h3>
+              {/* Pretty illustration */}
+              <div className="w-48 h-48 mb-8 relative">
+                <svg viewBox="0 0 200 200" className="w-full h-full">
+                  {/* Desk */}
+                  <rect x="20" y="120" width="160" height="60" rx="8" fill="#8B5CF6" opacity="0.1"/>
+                  <rect x="20" y="110" width="160" height="20" rx="4" fill="#8B5CF6" opacity="0.2"/>
+                  
+                  {/* Computer screen */}
+                  <rect x="70" y="60" width="60" height="40" rx="4" fill="#374151"/>
+                  <rect x="75" y="65" width="50" height="30" rx="2" fill="#60A5FA"/>
+                  <circle cx="100" cy="80" r="3" fill="#FBBF24"/>
+                  
+                  {/* Laptop base */}
+                  <rect x="65" y="95" width="70" height="25" rx="6" fill="#6B7280"/>
+                  <rect x="70" y="100" width="60" height="15" rx="3" fill="#374151"/>
+                  
+                  {/* Person */}
+                  <circle cx="140" cy="70" r="12" fill="#FBBF24"/>
+                  <rect x="130" y="80" width="20" height="35" rx="8" fill="#60A5FA"/>
+                  <rect x="125" y="85" width="10" height="25" rx="4" fill="#FBBF24"/>
+                  <rect x="155" y="85" width="10" height="25" rx="4" fill="#FBBF24"/>
+                  <rect x="135" y="110" width="8" height="20" rx="3" fill="#374151"/>
+                  <rect x="147" y="110" width="8" height="20" rx="3" fill="#374151"/>
+                  
+                  {/* Papers/documents */}
+                  <rect x="40" y="90" width="15" height="20" rx="2" fill="#FFFFFF" stroke="#E5E7EB" strokeWidth="1"/>
+                  <rect x="45" y="85" width="15" height="20" rx="2" fill="#FFFFFF" stroke="#E5E7EB" strokeWidth="1"/>
+                  
+                  {/* Coffee cup */}
+                  <ellipse cx="160" cy="100" rx="6" ry="8" fill="#8B5CF6"/>
+                  <ellipse cx="160" cy="95" rx="5" ry="3" fill="#FFFFFF"/>
+                  
+                  {/* Floating elements */}
+                  <circle cx="30" cy="40" r="3" fill="#FBBF24" opacity="0.6"/>
+                  <circle cx="170" cy="30" r="4" fill="#60A5FA" opacity="0.6"/>
+                  <rect x="45" y="25" width="8" height="8" rx="2" fill="#8B5CF6" opacity="0.6"/>
+                </svg>
+              </div>
+              
+              <h3 className="text-2xl font-bold text-gray-800 mb-4">No Files Uploaded</h3>
               <p className="text-gray-600 text-center mb-8 max-w-md">
-                Get started by uploading your investigation documents. Supported file types: .txt files
+                Use the "Upload Files" button in the sidebar to get started with your investigation documents. Supported file types: .txt files
               </p>
-              <label
-                htmlFor="file-upload-input"
-                className={`bg-blue-600 hover:bg-blue-700 text-white font-medium py-4 px-8 rounded-lg transition-colors duration-200 shadow-sm hover:shadow-md flex items-center justify-center space-x-3 text-lg min-w-[280px] h-[60px] ${uploading ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
-              >
-                <span>📎</span>
-                <span>{uploading ? 'Uploading...' : 'Choose Files to Upload'}</span>
-                {uploading && (
-                  <div className="animate-spin w-5 h-5 border-2 border-white border-t-transparent rounded-full"></div>
-                )}
-              </label>
-              <p className="text-sm text-gray-500 mt-4">
-                You can select multiple files at once
-              </p>
+              {uploading && (
+                <div className="flex items-center space-x-2 text-blue-600">
+                  <div className="animate-spin w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full"></div>
+                  <span className="font-medium">Uploading...</span>
+                </div>
+              )}
             </div>
           ) : null}
-        </div>
-      </div>
       
       {/* Right-click context menu */}
       {contextMenu && (
@@ -373,7 +354,9 @@ const FileManagerView: React.FC = () => {
             }}
             className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-700 flex items-center space-x-2 transition-colors first:rounded-t-lg"
           >
-            <span>✏️</span>
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+            </svg>
             <span>Rename</span>
           </button>
           <button
@@ -383,7 +366,9 @@ const FileManagerView: React.FC = () => {
             }}
             className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-red-50 hover:text-red-700 flex items-center space-x-2 transition-colors last:rounded-b-lg"
           >
-            <span>🗑️</span>
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
             <span>Delete</span>
           </button>
         </div>
