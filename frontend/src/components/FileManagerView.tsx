@@ -6,6 +6,34 @@ const FileManagerView: React.FC = () => {
   const { uploadedFiles, setUploadedFiles, uploading, setUploading, setJobStatus } = useAppContext();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const API_BASE = 'http://localhost:8000';
+
+  // Load existing files on mount
+  React.useEffect(() => {
+    const loadExistingFiles = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/api/files`);
+        if (response.ok) {
+          const data = await response.json();
+          const existingFiles: UploadedFile[] = data.files.map((file: any) => ({
+            id: Math.random().toString(36).substring(7),
+            name: file.filename,
+            size: file.size,
+            type: 'text/plain',
+            url: '',
+            uploaded: true
+          }));
+          setUploadedFiles(existingFiles);
+        }
+      } catch (error) {
+        console.error('Error loading existing files:', error);
+      }
+    };
+
+    // Only load if no files in context yet
+    if (uploadedFiles.length === 0) {
+      loadExistingFiles();
+    }
+  }, []);
   
   // File management state
   const [contextMenu, setContextMenu] = useState<{ fileId: string; x: number; y: number } | null>(null);
@@ -52,7 +80,10 @@ const FileManagerView: React.FC = () => {
       setUploadedFiles((prev) => [...prev, ...newFiles]);
       
       // Upload files one by one
-      for (const file of files) {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const fileId = newFiles[i].id;
+        
         const formData = new FormData();
         formData.append('file', file);
         
@@ -62,10 +93,10 @@ const FileManagerView: React.FC = () => {
         });
         
         if (response.ok) {
-          // Mark this specific file as uploaded
+          // Mark this specific file as uploaded using ID
           setUploadedFiles((prev) => 
             prev.map((f) => 
-              f.name === file.name ? { ...f, uploaded: true } : f
+              f.id === fileId ? { ...f, uploaded: true } : f
             )
           );
         } else {
@@ -104,6 +135,31 @@ const FileManagerView: React.FC = () => {
     setEditName(getDisplayName(currentName)); // Use display name without .txt
     setContextMenu(null);
     setActiveDropdown(null);
+  };
+
+  const handleDelete = async (fileId: string, fileName: string) => {
+    if (!window.confirm(`Are you sure you want to delete "${getDisplayName(fileName)}"? This action cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      // Delete from server
+      const response = await fetch(`${API_BASE}/api/files/${fileName}`, {
+        method: 'DELETE',
+      });
+
+      if (response.ok) {
+        // Remove from local state
+        setUploadedFiles(prev => prev.filter(file => file.id !== fileId));
+        setContextMenu(null);
+        setActiveDropdown(null);
+      } else {
+        throw new Error('Failed to delete file from server');
+      }
+    } catch (error) {
+      console.error('Error deleting file:', error);
+      alert('Failed to delete file. Please try again.');
+    }
   };
 
   const saveRename = () => {
@@ -156,7 +212,7 @@ const FileManagerView: React.FC = () => {
 
   return (
     <div className="h-full p-6">
-      <div className="h-full bg-white/40 backdrop-blur-sm rounded-xl border border-white/30 shadow-lg overflow-auto">
+      <div className="h-full bg-white rounded-lg border border-gray-200 overflow-auto">
         {/* Hidden file input */}
         <input
           ref={fileInputRef}
@@ -183,7 +239,7 @@ const FileManagerView: React.FC = () => {
                 <button
                   onClick={handleUploadClick}
                   disabled={uploading}
-                  className="bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 disabled:from-gray-400 disabled:to-gray-500 text-white font-medium py-3 px-6 rounded-lg transition-colors duration-200 shadow-md hover:shadow-lg disabled:cursor-not-allowed flex items-center justify-center space-x-2 min-w-[180px] h-[48px]"
+                  className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-medium py-3 px-6 rounded-lg transition-colors duration-200 shadow-sm hover:shadow-md disabled:cursor-not-allowed flex items-center justify-center space-x-2 min-w-[180px] h-[48px]"
                 >
                   <span>📁</span>
                   <span>Upload More Files</span>
@@ -197,7 +253,7 @@ const FileManagerView: React.FC = () => {
 
           {/* Files List */}
           {uploadedFiles.length > 0 && (
-            <div className="bg-white/80 backdrop-blur-sm rounded-xl shadow-lg p-6 border border-white/30">
+            <div className="bg-gray-50 rounded-lg p-6 border border-gray-200">
               <h2 className="text-2xl font-semibold text-gray-800 mb-6">
                 Uploaded Files ({uploadedFiles.length})
               </h2>
@@ -205,7 +261,7 @@ const FileManagerView: React.FC = () => {
                 {uploadedFiles.map((file) => (
                   <div
                     key={file.id}
-                    className="relative flex items-center justify-between p-4 bg-white/40 backdrop-blur-sm rounded-lg hover:bg-white/60 transition-all duration-200 border border-white/20"
+                    className="relative flex items-center justify-between p-4 bg-white rounded-lg hover:bg-gray-50 transition-all duration-200 border border-gray-200"
                     onContextMenu={(e) => handleRightClick(e, file.id)}
                   >
                     <div className="flex items-center space-x-4 flex-1 min-w-0">
@@ -247,7 +303,7 @@ const FileManagerView: React.FC = () => {
                           setActiveDropdown(activeDropdown === file.id ? null : file.id);
                           setContextMenu(null);
                         }}
-                        className="p-2 text-gray-400 hover:text-gray-600 hover:bg-white/50 rounded-full transition-colors"
+                        className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors"
                       >
                         <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
                           <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
@@ -256,14 +312,20 @@ const FileManagerView: React.FC = () => {
                       
                       {/* Dropdown menu */}
                       {activeDropdown === file.id && (
-                        <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl z-[100] min-w-[120px] backdrop-blur-sm"
-                             style={{ boxShadow: '0 10px 25px rgba(0, 0, 0, 0.15)' }}>
+                        <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-[100] min-w-[120px]">
                           <button
                             onClick={() => handleRename(file.id, file.name)}
-                            className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-700 flex items-center space-x-2 rounded-lg transition-colors first:rounded-t-lg last:rounded-b-lg"
+                            className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-700 flex items-center space-x-2 transition-colors first:rounded-t-lg"
                           >
                             <span>✏️</span>
                             <span>Rename</span>
+                          </button>
+                          <button
+                            onClick={() => handleDelete(file.id, file.name)}
+                            className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-red-50 hover:text-red-700 flex items-center space-x-2 transition-colors last:rounded-b-lg"
+                          >
+                            <span>🗑️</span>
+                            <span>Delete</span>
                           </button>
                         </div>
                       )}
@@ -284,7 +346,7 @@ const FileManagerView: React.FC = () => {
               </p>
               <label
                 htmlFor="file-upload-input"
-                className={`bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 disabled:from-gray-400 disabled:to-gray-500 text-white font-medium py-4 px-8 rounded-lg transition-colors duration-200 shadow-lg hover:shadow-xl flex items-center justify-center space-x-3 text-lg min-w-[280px] h-[60px] ${uploading ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
+                className={`bg-blue-600 hover:bg-blue-700 text-white font-medium py-4 px-8 rounded-lg transition-colors duration-200 shadow-sm hover:shadow-md flex items-center justify-center space-x-3 text-lg min-w-[280px] h-[60px] ${uploading ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
               >
                 <span>📎</span>
                 <span>{uploading ? 'Uploading...' : 'Choose Files to Upload'}</span>
@@ -303,11 +365,10 @@ const FileManagerView: React.FC = () => {
       {/* Right-click context menu */}
       {contextMenu && (
         <div 
-          className="fixed bg-white border border-gray-200 rounded-lg shadow-xl z-[9999] min-w-[120px] backdrop-blur-sm"
+          className="fixed bg-white border border-gray-200 rounded-lg shadow-lg z-[9999] min-w-[120px]"
           style={{ 
             left: `${Math.min(contextMenu.x, window.innerWidth - 130)}px`, 
-            top: `${Math.min(contextMenu.y, window.innerHeight - 60)}px`,
-            boxShadow: '0 10px 25px rgba(0, 0, 0, 0.15)'
+            top: `${Math.min(contextMenu.y, window.innerHeight - 100)}px`
           }}
         >
           <button
@@ -315,10 +376,20 @@ const FileManagerView: React.FC = () => {
               const file = uploadedFiles.find(f => f.id === contextMenu.fileId);
               if (file) handleRename(file.id, file.name);
             }}
-            className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-700 flex items-center space-x-2 rounded-lg transition-colors first:rounded-t-lg last:rounded-b-lg"
+            className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-700 flex items-center space-x-2 transition-colors first:rounded-t-lg"
           >
             <span>✏️</span>
             <span>Rename</span>
+          </button>
+          <button
+            onClick={() => {
+              const file = uploadedFiles.find(f => f.id === contextMenu.fileId);
+              if (file) handleDelete(file.id, file.name);
+            }}
+            className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-red-50 hover:text-red-700 flex items-center space-x-2 transition-colors last:rounded-b-lg"
+          >
+            <span>🗑️</span>
+            <span>Delete</span>
           </button>
         </div>
       )}

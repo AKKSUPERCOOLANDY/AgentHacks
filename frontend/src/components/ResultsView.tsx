@@ -104,6 +104,19 @@ const ResultsView: React.FC = () => {
     setSelectedJob(null);
   };
 
+  const handleDeleteJob = (jobId: string, jobName: string) => {
+    if (!window.confirm(`Are you sure you want to delete the job "${jobName}"? This action cannot be undone.`)) {
+      return;
+    }
+
+    setJobHistory(prev => prev.filter(job => job.id !== jobId));
+    
+    // If we're currently viewing the deleted job, go back to list
+    if (selectedJob && selectedJob.id === jobId) {
+      setSelectedJob(null);
+    }
+  };
+
   if (loading) {
     return (
       <div className="h-full p-6">
@@ -267,10 +280,12 @@ const ResultsView: React.FC = () => {
                 {jobHistory.map((job) => (
                   <div
                     key={job.id}
-                    className="flex items-center justify-between p-4 bg-white/40 backdrop-blur-sm rounded-lg hover:bg-white/60 transition-all duration-200 border border-white/20 cursor-pointer"
-                    onClick={() => handleJobClick(job)}
+                    className="flex items-center justify-between p-4 bg-white/40 backdrop-blur-sm rounded-lg hover:bg-white/60 transition-all duration-200 border border-white/20"
                   >
-                    <div className="flex items-center space-x-4 flex-1 min-w-0">
+                    <div 
+                      className="flex items-center space-x-4 flex-1 min-w-0 cursor-pointer"
+                      onClick={() => handleJobClick(job)}
+                    >
                       <div className="text-2xl">
                         {job.status === 'completed' ? '📊' : '❌'}
                       </div>
@@ -292,10 +307,27 @@ const ResultsView: React.FC = () => {
                         </p>
                       </div>
                     </div>
-                    <div className="text-gray-400">
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                      </svg>
+                    <div className="flex items-center space-x-2">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteJob(job.id, job.name);
+                        }}
+                        className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors"
+                        title="Delete job"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                      </button>
+                      <div 
+                        className="text-gray-400 cursor-pointer p-2"
+                        onClick={() => handleJobClick(job)}
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                        </svg>
+                      </div>
                     </div>
                   </div>
                 ))}
