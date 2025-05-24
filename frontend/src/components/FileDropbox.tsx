@@ -16,11 +16,33 @@ interface AnalysisStatus {
   conclusion?: string;
 }
 
+interface AnalysisSummary {
+  case_overview: {
+    files_analyzed: number;
+    document_types: string[];
+    total_characters: number;
+  };
+  analysis_metrics: {
+    total_nodes_created: number;
+    analysis_depth: number;
+    tasks_completed: number;
+    tasks_failed: number;
+  };
+  key_findings: string[];
+  evidence_summary: Array<{
+    type: string;
+    description: string;
+  }>;
+  conclusion: string;
+  case_status: string;
+}
+
 const FileDropbox: React.FC = () => {
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
   const [analysisStatus, setAnalysisStatus] = useState<AnalysisStatus>({ status: 'idle' });
   const [uploading, setUploading] = useState(false);
+  const [analysisSummary, setAnalysisSummary] = useState<AnalysisSummary | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const API_BASE = 'http://localhost:8000';
 
@@ -102,6 +124,20 @@ const FileDropbox: React.FC = () => {
     }
   };
 
+  const fetchAnalysisSummary = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/analysis/summary`);
+      if (response.ok) {
+        const data = await response.json();
+        setAnalysisSummary(data.summary);
+        return true;
+      }
+    } catch (error) {
+      console.error('Summary fetch error:', error);
+    }
+    return false;
+  };
+
   const fetchAnalysisStatus = async () => {
     try {
       const response = await fetch(`${API_BASE}/api/analysis/status`);
@@ -109,6 +145,8 @@ const FileDropbox: React.FC = () => {
         const data = await response.json();
         if (data.status === 'idle' && analysisStatus.status === 'running') {
           setAnalysisStatus({ status: 'completed', message: 'Analysis completed successfully!' });
+          // Fetch the summary when analysis completes
+          await fetchAnalysisSummary();
         }
       }
     } catch (error) {
@@ -262,9 +300,19 @@ const FileDropbox: React.FC = () => {
                   </div>
                 )}
                 {analysisStatus.status === 'completed' && (
-                  <div className="flex items-center space-x-2 text-green-600">
-                    <span>✅</span>
-                    <span className="font-medium">Analysis Complete</span>
+                  <div className="flex items-center space-x-4">
+                    <div className="flex items-center space-x-2 text-green-600">
+                      <span>✅</span>
+                      <span className="font-medium">Analysis Complete</span>
+                    </div>
+                    {!analysisSummary && (
+                      <button
+                        onClick={fetchAnalysisSummary}
+                        className="bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white font-medium py-2 px-4 rounded-lg transition-all duration-200 shadow-md hover:shadow-lg transform hover:scale-105"
+                      >
+                        📊 View Summary
+                      </button>
+                    )}
                   </div>
                 )}
                 {analysisStatus.status === 'error' && (
@@ -280,6 +328,94 @@ const FileDropbox: React.FC = () => {
                 <p className="text-sm text-gray-700">{analysisStatus.message}</p>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Analysis Summary */}
+        {analysisSummary && (
+          <div className="bg-white/80 backdrop-blur-sm rounded-xl shadow-lg p-6 border border-white/30 mb-6">
+            <h2 className="text-2xl font-semibold text-gray-800 mb-6 flex items-center">
+              <span className="mr-2">📊</span>
+              Analysis Summary
+            </h2>
+            
+            {/* Case Overview */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+              <div className="bg-blue-50 p-4 rounded-lg">
+                <h3 className="font-semibold text-blue-800 mb-2">Files Analyzed</h3>
+                <p className="text-2xl font-bold text-blue-600">{analysisSummary.case_overview.files_analyzed}</p>
+                <p className="text-sm text-blue-600">
+                  Types: {analysisSummary.case_overview.document_types.join(', ')}
+                </p>
+              </div>
+              <div className="bg-green-50 p-4 rounded-lg">
+                <h3 className="font-semibold text-green-800 mb-2">Analysis Depth</h3>
+                <p className="text-2xl font-bold text-green-600">{analysisSummary.analysis_metrics.analysis_depth}</p>
+                <p className="text-sm text-green-600">
+                  {analysisSummary.analysis_metrics.total_nodes_created} nodes created
+                </p>
+              </div>
+              <div className="bg-purple-50 p-4 rounded-lg">
+                <h3 className="font-semibold text-purple-800 mb-2">Tasks Completed</h3>
+                <p className="text-2xl font-bold text-purple-600">{analysisSummary.analysis_metrics.tasks_completed}</p>
+                <p className="text-sm text-purple-600">
+                  {analysisSummary.analysis_metrics.tasks_failed} failed
+                </p>
+              </div>
+            </div>
+
+            {/* Key Findings */}
+            <div className="mb-6">
+              <h3 className="text-lg font-semibold text-gray-800 mb-3">🔍 Key Findings</h3>
+              <div className="space-y-2">
+                {analysisSummary.key_findings.map((finding, index) => (
+                  <div key={index} className="bg-gray-50 p-3 rounded-lg">
+                    <p className="text-gray-700">{finding}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Evidence Summary */}
+            <div className="mb-6">
+              <h3 className="text-lg font-semibold text-gray-800 mb-3">📋 Evidence Summary</h3>
+              <div className="space-y-2">
+                {analysisSummary.evidence_summary.map((evidence, index) => (
+                  <div key={index} className="bg-yellow-50 p-3 rounded-lg border-l-4 border-yellow-400">
+                    <h4 className="font-medium text-yellow-800">{evidence.type}</h4>
+                    <p className="text-yellow-700 text-sm">{evidence.description}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Conclusion */}
+            <div className="mb-4">
+              <h3 className="text-lg font-semibold text-gray-800 mb-3">🏁 Conclusion</h3>
+              <div className="bg-indigo-50 p-4 rounded-lg border-l-4 border-indigo-400">
+                <pre className="text-indigo-800 whitespace-pre-wrap text-sm">{analysisSummary.conclusion}</pre>
+              </div>
+            </div>
+
+            {/* Case Status */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <span className="text-lg">📈</span>
+                <span className="font-semibold text-gray-800">Case Status:</span>
+                <span className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium">
+                  {analysisSummary.case_status}
+                </span>
+              </div>
+              <button
+                onClick={() => setAnalysisSummary(null)}
+                className="text-gray-500 hover:text-gray-700 p-2 hover:bg-gray-100 rounded-lg transition-colors duration-200"
+                title="Close summary"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
           </div>
         )}
 

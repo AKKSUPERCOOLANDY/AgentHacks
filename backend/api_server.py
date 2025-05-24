@@ -88,6 +88,74 @@ manager = ConnectionManager()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+def generate_analysis_summary(analysis_results, final_conclusion, analysis_system):
+    """Generate a comprehensive analysis summary for display"""
+    try:
+        # Get document analyzer summary
+        doc_analyzer = analysis_system.document_analyzer if analysis_system else None
+        doc_summary = doc_analyzer.get_document_summary() if doc_analyzer else {}
+        
+        # Get memory tree statistics
+        tree_stats = analysis_system.memory_tree.get_tree_statistics() if analysis_system and analysis_system.memory_tree else {}
+        
+        # Get task queue statistics  
+        queue_stats = analysis_system.task_queue.get_queue_statistics() if analysis_system and analysis_system.task_queue else {}
+        
+        # Extract key findings from analysis results
+        key_findings = []
+        evidence_found = []
+        
+        for result in analysis_results or []:
+            if hasattr(result, 'result') and result.result:
+                # Extract key points from result
+                result_text = str(result.result)
+                if len(result_text) > 100:
+                    key_findings.append(result_text[:200] + "...")
+                else:
+                    key_findings.append(result_text)
+        
+        # Get recent nodes from memory tree for evidence summary
+        if analysis_system and analysis_system.memory_tree:
+            recent_nodes = analysis_system.memory_tree.get_recent_nodes(limit=10)
+            for node in recent_nodes:
+                if hasattr(node, 'name') and hasattr(node, 'description'):
+                    if any(keyword in node.name.lower() for keyword in ['evidence', 'finding', 'analysis']):
+                        evidence_found.append({
+                            "type": node.name,
+                            "description": node.description[:150] + "..." if len(node.description) > 150 else node.description
+                        })
+        
+        summary = {
+            "case_overview": {
+                "files_analyzed": doc_summary.get('total_documents', 0),
+                "document_types": doc_summary.get('document_types', []),
+                "total_characters": doc_summary.get('total_characters', 0)
+            },
+            "analysis_metrics": {
+                "total_nodes_created": tree_stats.get('total_nodes', 0),
+                "analysis_depth": tree_stats.get('max_depth', 0),
+                "tasks_completed": queue_stats.get('completed_tasks', 0),
+                "tasks_failed": queue_stats.get('failed_tasks', 0)
+            },
+            "key_findings": key_findings[:5],  # Top 5 findings
+            "evidence_summary": evidence_found[:5],  # Top 5 evidence items
+            "conclusion": final_conclusion or "Analysis completed successfully",
+            "case_status": "Analysis Complete - Ready for Review"
+        }
+        
+        return summary
+        
+    except Exception as e:
+        logger.error(f"Error generating analysis summary: {e}")
+        return {
+            "case_overview": {"files_analyzed": 0, "document_types": [], "total_characters": 0},
+            "analysis_metrics": {"total_nodes_created": 0, "analysis_depth": 0, "tasks_completed": 0, "tasks_failed": 0},
+            "key_findings": [],
+            "evidence_summary": [],
+            "conclusion": "Analysis completed with limited summary data available",
+            "case_status": "Analysis Complete"
+        }
+
 def get_newest_database() -> Optional[str]:
     """Find the newest investigation database"""
     try:
@@ -488,6 +556,7 @@ async def get_system_status():
 analysis_system: Optional[DocumentAnalysisSystem] = None
 analysis_running = False
 current_session_files: List[str] = []  # Track files uploaded in current session
+last_analysis_summary: Optional[Dict] = None  # Store last analysis summary
 
 @app.post("/api/upload")
 async def upload_file(file: UploadFile = File(...)):
@@ -526,8 +595,8 @@ async def upload_file(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"Error uploading file: {str(e)}")
 
 @app.post("/api/upload-and-analyze")
-async def upload_and_analyze(file: UploadFile = File(...)):
-    """Upload a case file and immediately start analysis"""
+async def upload_and_analyze(files: List[UploadFile] = File(...)):
+    """Upload multiple case files and immediately start analysis"""
     global current_session_files, analysis_running, analysis_system
     
     try:
@@ -544,16 +613,26 @@ async def upload_and_analyze(file: UploadFile = File(...)):
         case_files_dir = Path("case_files")
         case_files_dir.mkdir(exist_ok=True)
         
-        # Save the uploaded file
-        file_path = case_files_dir / file.filename
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+        uploaded_files = []
+        total_size = 0
         
-        # Track this file as the only session file
-        current_session_files = [file.filename]
+        # Save all uploaded files
+        for file in files:
+            file_path = case_files_dir / file.filename
+            with open(file_path, "wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
+            
+            # Track this file in current session
+            current_session_files.append(file.filename)
+            uploaded_files.append({
+                "filename": file.filename,
+                "size": file.size
+            })
+            total_size += file.size
+            
+            logger.info(f"📁 Uploaded for analysis: {file.filename} ({file.size} bytes)")
         
-        logger.info(f"📁 Direct upload for analysis: {file.filename} ({file.size} bytes)")
-        logger.info(f"📋 Session reset to single file: {current_session_files}")
+        logger.info(f"📋 Session set to {len(current_session_files)} files: {current_session_files}")
         
         # Check for GEMINI_API_KEY
         if not os.getenv("GEMINI_API_KEY"):
@@ -572,9 +651,10 @@ async def upload_and_analyze(file: UploadFile = File(...)):
         return JSONResponse(
             status_code=202,
             content={
-                "message": f"File '{file.filename}' uploaded and analysis started",
-                "filename": file.filename,
-                "size": file.size,
+                "message": f"{len(uploaded_files)} files uploaded and analysis started",
+                "files": uploaded_files,
+                "total_files": len(uploaded_files),
+                "total_size": total_size,
                 "session_files": current_session_files,
                 "analysis_status": "running"
             }
@@ -586,7 +666,7 @@ async def upload_and_analyze(file: UploadFile = File(...)):
     except Exception as e:
         analysis_running = False
         logger.error(f"❌ Upload and analyze error: {e}")
-        raise HTTPException(status_code=500, detail=f"Error uploading and analyzing file: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error uploading and analyzing files: {str(e)}")
 
 @app.post("/api/upload/multiple")
 async def upload_multiple_files(files: List[UploadFile] = File(...)):
@@ -744,7 +824,7 @@ async def start_document_analysis():
 
 async def run_analysis_background():
     """Run the document analysis in the background"""
-    global analysis_system, analysis_running
+    global analysis_system, analysis_running, last_analysis_summary
     
     try:
         if not analysis_system:
@@ -771,13 +851,22 @@ async def run_analysis_background():
         logger.info("🔍 Running document analysis...")
         analysis_results, final_conclusion = await analysis_system.analyze_documents()
         
-        # Broadcast completion message
+        # Generate summary from results
+        logger.info("📊 Generating analysis summary...")
+        analysis_summary = generate_analysis_summary(analysis_results, final_conclusion, analysis_system)
+        
+        # Store summary globally for retrieval
+        last_analysis_summary = analysis_summary
+        logger.info(f"✅ Analysis summary generated and stored: {len(analysis_summary.get('key_findings', []))} findings")
+        
+        # Broadcast completion message with summary
         await manager.broadcast(json.dumps({
-            "type": "analysis_status", 
+            "type": "analysis_completed", 
             "data": {
                 "status": "completed",
                 "message": "Document analysis completed successfully",
                 "conclusion": final_conclusion,
+                "summary": analysis_summary,
                 "timestamp": datetime.now().isoformat()
             }
         }))
@@ -828,6 +917,31 @@ async def get_analysis_status():
     except Exception as e:
         logger.error(f"❌ Error getting analysis status: {e}")
         raise HTTPException(status_code=500, detail=f"Error getting analysis status: {str(e)}")
+
+@app.get("/api/analysis/summary")
+async def get_analysis_summary():
+    """Get the summary of the last completed analysis"""
+    global last_analysis_summary
+    
+    try:
+        if not last_analysis_summary:
+            return JSONResponse(
+                status_code=404,
+                content={"message": "No analysis summary available. Please run an analysis first."}
+            )
+        
+        return JSONResponse(
+            status_code=200,
+            content={
+                "summary": last_analysis_summary,
+                "timestamp": datetime.now().isoformat(),
+                "message": "Analysis summary retrieved successfully"
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ Error getting analysis summary: {e}")
+        raise HTTPException(status_code=500, detail=f"Error getting analysis summary: {str(e)}")
 
 @app.post("/api/session/clear")
 async def clear_session():

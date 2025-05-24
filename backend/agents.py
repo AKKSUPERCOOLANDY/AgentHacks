@@ -365,23 +365,13 @@ class PlannerAgent(BaseAgent):
         return False
 
     def _conclusion_exists_in_tree(self) -> bool:
-        """Check if a conclusion node already exists in the memory tree"""
+        """Check if a conclusion has already been generated"""
         try:
-            if not self.memory_tree:
-                return False
-                
-            # Look for conclusion nodes in the tree (don't require root_id)
-            for node in self.memory_tree.nodes.values():
-                node_name = node.name.upper()
-                conclusion_keywords = ['FINAL CONCLUSION', 'INVESTIGATION CONCLUDED', 'SYNTHESIS FINAL', 'FINAL INVESTIGATION CONCLUSION']
-                if any(keyword in node_name for keyword in conclusion_keywords):
-                    logger.info(f"[PLANNER] 🎯 Found existing conclusion node: {node.name}")
-                    return True
-                    
-            return False
+            # Check if conclusion exists in context bank instead of tree
+            return "final_conclusion" in self.context_bank or self.conclusion_created
             
         except Exception as e:
-            logger.error(f"[PLANNER] Error checking for conclusion in tree: {e}")
+            logger.error(f"[PLANNER] Error checking for conclusion: {e}")
             return False
 
     def _filter_for_depth_and_quality(self, new_tasks):
@@ -503,19 +493,11 @@ class PlannerAgent(BaseAgent):
             RECOMMENDATION: Review findings for next investigative steps based on case requirements.
             """
             
-            # Create conclusion node directly
-            conclusion_node = MemoryNode(
-                name="FINAL INVESTIGATION CONCLUSION",
-                description=conclusion_text
-            )
-            conclusion_node.status = NodeStatus.COMPLETED
+            # DO NOT add conclusion to memory tree - it should only be a summary result
+            # Store conclusion in context for retrieval instead
+            self._update_context_bank("final_conclusion", conclusion_text)
             
-            if self.memory_tree.root_id:
-                self.memory_tree.add_node(conclusion_node, self.memory_tree.root_id)
-            else:
-                self.memory_tree.add_node(conclusion_node)
-            
-            logger.info("[PLANNER] ✅ Forced conclusion added to memory tree")
+            logger.info("[PLANNER] ✅ Investigation conclusion generated (not added to tree)")
             
         except Exception as e:
             logger.error(f"[PLANNER] ❌ Error creating forced conclusion: {e}")
@@ -1181,19 +1163,11 @@ class SynthesisAgent(BaseAgent):
             Reasoning: {synthesis_result.get('reasoning', 'High confidence reached through systematic evidence analysis')}
             """
             
-            # Create conclusion node directly
-            conclusion_node = MemoryNode(
-                name="SYNTHESIS FINAL CONCLUSION",
-                description=conclusion_text
-            )
-            conclusion_node.status = NodeStatus.COMPLETED
+            # DO NOT add conclusion to memory tree - it should only be a summary result
+            # Store conclusion in context for retrieval instead
+            self._update_context_bank("synthesis_conclusion", conclusion_text)
             
-            if self.memory_tree.root_id:
-                self.memory_tree.add_node(conclusion_node, self.memory_tree.root_id)
-            else:
-                self.memory_tree.add_node(conclusion_node)
-            
-            logger.info("[SYNTHESIS] ✅ Forced synthesis conclusion added to memory tree")
+            logger.info("[SYNTHESIS] ✅ Synthesis conclusion generated (not added to tree)")
             
         except Exception as e:
             logger.error(f"[SYNTHESIS] ❌ Error creating forced conclusion: {e}")
@@ -1221,23 +1195,13 @@ class SynthesisAgent(BaseAgent):
                 logger.info("[SYNTHESIS] 🛑 Conclusion task already exists in queue - skipping fallback")
 
     def _conclusion_exists_in_tree(self) -> bool:
-        """Check if a conclusion node already exists in the memory tree"""
+        """Check if a conclusion has already been generated"""
         try:
-            if not self.memory_tree:
-                return False
-                
-            # Look for conclusion nodes in the tree (don't require root_id)
-            for node in self.memory_tree.nodes.values():
-                node_name = node.name.upper()
-                conclusion_keywords = ['FINAL CONCLUSION', 'INVESTIGATION CONCLUDED', 'SYNTHESIS FINAL', 'FINAL INVESTIGATION CONCLUSION']
-                if any(keyword in node_name for keyword in conclusion_keywords):
-                    logger.info(f"[SYNTHESIS] 🎯 Found existing conclusion node: {node.name}")
-                    return True
-                    
-            return False
+            # Check if conclusion exists in context bank instead of tree
+            return "synthesis_conclusion" in self.context_bank
             
         except Exception as e:
-            logger.error(f"[SYNTHESIS] Error checking for conclusion in tree: {e}")
+            logger.error(f"[SYNTHESIS] Error checking for conclusion: {e}")
             return False
 
     def _format_recent_nodes(self, recent_nodes):
