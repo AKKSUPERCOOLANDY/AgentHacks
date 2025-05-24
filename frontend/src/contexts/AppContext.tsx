@@ -28,10 +28,17 @@ interface JobSummary {
     tasks_completed: number;
     tasks_failed: number;
   };
-  key_findings: string[];
+  key_findings: Array<{
+    title: string;
+    description: string;
+    source_type: string;
+  }>;
   evidence_summary: Array<{
+    id: string;
+    title: string;
     type: string;
     description: string;
+    status: string;
   }>;
   conclusion: string;
   case_status: string;
@@ -50,12 +57,13 @@ interface JobSummary {
   next_steps?: string[]; // Added for next steps
 }
 
-interface CompletedJob {
+interface Job {
   id: string;
   name: string;
-  completedAt: string;
-  summary: JobSummary;
-  status: 'completed' | 'error';
+  completedAt?: string;
+  createdAt?: string;
+  summary?: JobSummary;
+  status: 'pending' | 'in_progress' | 'running' | 'completed' | 'error' | 'failed';
 }
 
 interface AppContextType {
@@ -67,8 +75,8 @@ interface AppContextType {
   setJobSummary: React.Dispatch<React.SetStateAction<JobSummary | null>>;
   currentJobName: string;
   setCurrentJobName: React.Dispatch<React.SetStateAction<string>>;
-  jobHistory: CompletedJob[];
-  setJobHistory: React.Dispatch<React.SetStateAction<CompletedJob[]>>;
+  jobHistory: Job[];
+  setJobHistory: React.Dispatch<React.SetStateAction<Job[]>>;
   uploading: boolean;
   setUploading: React.Dispatch<React.SetStateAction<boolean>>;
 }
@@ -92,7 +100,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   const [jobStatus, setJobStatus] = useState<JobStatus>({ status: 'idle' });
   const [jobSummary, setJobSummary] = useState<JobSummary | null>(null);
   const [currentJobName, setCurrentJobName] = useState<string>('');
-  const [jobHistory, setJobHistory] = useState<CompletedJob[]>([]);
+  const [jobHistory, setJobHistory] = useState<Job[]>([]);
   const [uploading, setUploading] = useState(false);
 
   const value = {
@@ -113,4 +121,4 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 };
 
-export type { UploadedFile, JobStatus, JobSummary, CompletedJob }; 
+export type { UploadedFile, JobStatus, JobSummary, Job }; 

@@ -19,8 +19,9 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from gemini_client import GeminiClient
 from tree import MemoryTree, create_detective_case_tree
-from tasklist import TaskQueue
+from tasklist import TaskQueue, Task, TaskPriority, TaskStatus
 from agents import AgentSystem
+from agentview import AgentViewController
 
 # Set up comprehensive logging
 logging.basicConfig(
@@ -43,6 +44,7 @@ class SystemController:
         self.task_queue = None
         self.agent_system = None
         self.synthesis_task = None
+        self.view_controller = None
         
     async def initialize_system(self, case_name: str = "Test Investigation"):
         """Initialize all system components"""
@@ -62,12 +64,17 @@ class SystemController:
             logger.info("📋 Setting up task queue...")
             self.task_queue = TaskQueue("db/main_system.db")
             
+            # Initialize agent view controller
+            logger.info("🎯 Setting up agent view controller...")
+            self.view_controller = AgentViewController(self.memory_tree, self.task_queue)
+            
             # Initialize agent system
             logger.info("🤖 Initializing agent system...")
             self.agent_system = AgentSystem(
                 self.gemini_client, 
                 self.memory_tree, 
-                self.task_queue
+                self.task_queue,
+                self.view_controller
             )
             
             # Start the agent system

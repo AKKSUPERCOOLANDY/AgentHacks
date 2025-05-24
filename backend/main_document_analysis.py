@@ -21,6 +21,7 @@ from gemini_client import GeminiClient
 from tree import MemoryTree, MemoryNode
 from tasklist import TaskQueue, Task, TaskPriority
 from agents import AgentSystem
+from agentview import AgentViewController
 from document_analyzer import DocumentAnalyzer
 
 # Set up comprehensive logging
@@ -86,12 +87,17 @@ class DocumentAnalysisSystem:
             logger.info(f"📋 Setting up task queue (database: {queue_db_name})...")
             self.task_queue = TaskQueue(queue_db_name)
             
+            # Initialize agent view controller
+            logger.info("🎯 Setting up agent view controller...")
+            self.view_controller = AgentViewController(self.memory_tree, self.task_queue)
+            
             # Initialize agent system
             logger.info("🤖 Initializing agent system...")
             self.agent_system = AgentSystem(
                 self.gemini_client, 
                 self.memory_tree, 
-                self.task_queue
+                self.task_queue,
+                self.view_controller
             )
             
             # Give executor access to document analyzer

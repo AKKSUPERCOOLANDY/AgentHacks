@@ -8,7 +8,7 @@ import type { UploadedFile } from './contexts/AppContext';
 
 const AppContent = () => {
   const [activeTab, setActiveTab] = useState<'files' | 'analysis' | 'results' | 'tree'>('files');
-  const { uploadedFiles, setUploadedFiles, uploading, setUploading, setJobStatus } = useAppContext();
+  const { setUploadedFiles, uploading, setUploading, setJobStatus } = useAppContext();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const API_BASE = 'http://localhost:8000';
 

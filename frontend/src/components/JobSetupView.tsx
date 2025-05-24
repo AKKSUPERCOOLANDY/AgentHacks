@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useAppContext } from '../contexts/AppContext';
-import type { CompletedJob } from '../contexts/AppContext';
 
 const JobSetupView: React.FC = () => {
-  const { setJobStatus, jobStatus, uploadedFiles, setCurrentJobName, setJobSummary, setJobHistory, currentJobName } = useAppContext();
+  const { setJobStatus, jobStatus, uploadedFiles, setCurrentJobName, setJobHistory, jobHistory } = useAppContext();
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
   const [jobName, setJobName] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
@@ -25,11 +24,6 @@ const JobSetupView: React.FC = () => {
   // Get 5 most recently uploaded files (assuming they're in reverse chronological order)
   const recentFiles = availableFiles.slice(0, 5);
   
-  // Get selected file objects
-  const selectedFileObjects = availableFiles.filter(file => 
-    selectedFiles.includes(file.name)
-  );
-
   // Generate default job name based on selected files
   useEffect(() => {
     if (selectedFiles.length > 0 && !jobName) {
@@ -42,8 +36,6 @@ const JobSetupView: React.FC = () => {
       setJobName(timestamp);
     }
   }, [selectedFiles, jobName]);
-
-
 
   const toggleFileSelection = (fileName: string) => {
     setSelectedFiles(prev => 
@@ -76,6 +68,32 @@ const JobSetupView: React.FC = () => {
     setCurrentJobName(jobName);
     setJobStatus({ status: 'running', message: `Starting job: ${jobName}...` });
     
+    // Generate a more robust unique ID
+    const jobId = `${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    
+    // Check if there's already a running job with this name to prevent duplicates
+    const existingRunningJob = jobHistory.find(job => 
+      job.name === jobName && 
+      (job.status === 'running' || job.status === 'in_progress' || job.status === 'pending')
+    );
+    
+    if (existingRunningJob) {
+      alert(`A job with the name "${jobName}" is already running. Please wait for it to complete or use a different name.`);
+      setJobStatus({ status: 'idle' });
+      return;
+    }
+    
+    // Add running job to history immediately for real-time viewing
+    const runningJob = {
+      id: jobId,
+      name: jobName,
+      createdAt: new Date().toISOString(),
+      status: 'running' as const
+    };
+    
+    // Add to job history with running status
+    setJobHistory(prev => [runningJob, ...prev]);
+    
     try {
       // Clear session first
       await fetch(`${API_BASE}/api/session/clear`, { method: 'POST' });
@@ -87,14 +105,15 @@ const JobSetupView: React.FC = () => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          selected_files: selectedFiles
+          selected_files: selectedFiles,
+          job_id: jobId  // Pass the job ID to backend
         })
       });
       
       if (response.ok) {
         setJobStatus({ status: 'running', message: 'Job is running...' });
-        // Auto-redirect to Results page
-        window.dispatchEvent(new CustomEvent('switchTab', { detail: 'results' }));
+        // Auto-redirect to Graph page to see real-time progress
+        window.dispatchEvent(new CustomEvent('switchTab', { detail: 'tree' }));
       } else {
         const error = await response.json();
         throw new Error(error.detail || 'Failed to start job');
@@ -102,6 +121,13 @@ const JobSetupView: React.FC = () => {
     } catch (error) {
       console.error('Job start error:', error);
       setJobStatus({ status: 'error', message: `Failed to start job: ${error}` });
+      
+      // Remove the failed job from history and mark it as failed instead of deleting
+      setJobHistory(prev => prev.map(job => 
+        job.id === jobId 
+          ? { ...job, status: 'failed' as const, completedAt: new Date().toISOString() }
+          : job
+      ));
     }
   };
 
@@ -334,10 +360,6 @@ const JobSetupView: React.FC = () => {
                   </div>
                 )}
               </div>
-
-
-
-
 
               {/* Job status - only show errors */}
               {jobStatus.status === 'error' && (

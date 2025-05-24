@@ -1,4 +1,4 @@
-import React, { useMemo, useCallback } from 'react';
+import React, { useMemo, useCallback, useEffect } from 'react';
 import {
   ReactFlow,
   useNodesState,
@@ -30,37 +30,92 @@ interface TreeViewerProps {
 // Custom node component
 const CustomNode = ({ data }: { data: any }) => {
   const getStatusColor = (status: string, nodeName: string) => {
-    // Check if this is a synthesis analysis node
-    if (nodeName.toLowerCase().includes('synthesis analysis')) {
+    const nameLower = nodeName.toLowerCase();
+    
+    // Synthesis Analysis nodes (lightest logo color)
+    if (nameLower.includes('synthesis') || nameLower.includes('deep analysis')) {
       switch (status) {
-        case 'completed': return 'bg-orange-300'; // Less saturated orange
-        case 'in_progress': return 'bg-orange-400';
+        case 'completed': return 'bg-sky-200'; // Very light
+        case 'in_progress': return 'bg-sky-300';
         case 'failed': return 'bg-red-500';
-        case 'pending': return 'bg-orange-200';
-        default: return 'bg-orange-200';
+        case 'pending': return 'bg-sky-100';
+        default: return 'bg-sky-100';
       }
     }
     
-    // Check if this is a task node (contains "task" or other task indicators)
-    if (nodeName.toLowerCase().includes('task') || 
-        nodeName.toLowerCase().includes('evidence') ||
-        nodeName.toLowerCase().includes('investigation')) {
-    switch (status) {
-        case 'completed': return 'bg-sky-300'; // Lighter logo color
+    // Evidence nodes (light logo color)
+    if (nameLower.includes('evidence') || nameLower.includes('fingerprint') || 
+        nameLower.includes('fabric') || nameLower.includes('blood') || 
+        nameLower.includes('footprint') || nameLower.includes('weapon') ||
+        nameLower.includes('paperweight') || nameLower.includes('crystal')) {
+      switch (status) {
+        case 'completed': return 'bg-sky-300'; // Light
         case 'in_progress': return 'bg-sky-400';
         case 'failed': return 'bg-red-500';
         case 'pending': return 'bg-sky-200';
         default: return 'bg-sky-200';
-    }
+      }
     }
     
-    // Default colors for other node types
+    // Witness/People nodes (medium logo color)
+    if (nameLower.includes('witness') || nameLower.includes('robert') || 
+        nameLower.includes('margaret') || nameLower.includes('elena') ||
+        nameLower.includes('thomas') || nameLower.includes('blackwood') ||
+        nameLower.includes('hartwell') || nameLower.includes('rodriguez')) {
+      switch (status) {
+        case 'completed': return 'bg-sky-400'; // Medium
+        case 'in_progress': return 'bg-sky-500';
+        case 'failed': return 'bg-red-500';
+        case 'pending': return 'bg-sky-300';
+        default: return 'bg-sky-300';
+      }
+    }
+    
+    // Motive/Analysis nodes (medium-dark logo color)
+    if (nameLower.includes('motive') || nameLower.includes('alibi') ||
+        nameLower.includes('timeline') || nameLower.includes('background') ||
+        nameLower.includes('relationship') || nameLower.includes('inheritance')) {
+      switch (status) {
+        case 'completed': return 'bg-sky-500'; // Medium-dark
+        case 'in_progress': return 'bg-sky-600';
+        case 'failed': return 'bg-red-500';
+        case 'pending': return 'bg-sky-400';
+        default: return 'bg-sky-400';
+      }
+    }
+    
+    // Scene/Location nodes (medium-light logo color with cyan tint)
+    if (nameLower.includes('scene') || nameLower.includes('window') ||
+        nameLower.includes('library') || nameLower.includes('manor') ||
+        nameLower.includes('location') || nameLower.includes('entry')) {
+      switch (status) {
+        case 'completed': return 'bg-cyan-300'; // Cyan variant
+        case 'in_progress': return 'bg-cyan-400';
+        case 'failed': return 'bg-red-500';
+        case 'pending': return 'bg-cyan-200';
+        default: return 'bg-cyan-200';
+      }
+    }
+    
+    // Investigation/Task nodes (dark logo color)
+    if (nameLower.includes('investigation') || nameLower.includes('task') ||
+        nameLower.includes('analyze') || nameLower.includes('examine')) {
     switch (status) {
-      case 'completed': return 'bg-blue-500';
-      case 'in_progress': return 'bg-blue-600';
+        case 'completed': return 'bg-sky-600'; // Dark
+        case 'in_progress': return 'bg-sky-700';
+        case 'failed': return 'bg-red-500';
+        case 'pending': return 'bg-sky-500';
+        default: return 'bg-sky-500';
+      }
+    }
+    
+    // Default colors (medium logo color)
+    switch (status) {
+      case 'completed': return 'bg-sky-500';
+      case 'in_progress': return 'bg-sky-600';
       case 'failed': return 'bg-red-500';
-      case 'pending': return 'bg-gray-500';
-      default: return 'bg-gray-500';
+      case 'pending': return 'bg-sky-400';
+      default: return 'bg-sky-400';
     }
   };
 
@@ -90,7 +145,7 @@ const CustomNode = ({ data }: { data: any }) => {
         `}
         onClick={() => data.onNodeClick?.(data.nodeData)}
       >
-        <div className="p-4 text-white">
+        <div className="p-4 text-gray-800">
           <div className="flex items-center space-x-2">
             <span className="text-lg font-bold">
               {getStatusIcon(data.status)}
@@ -197,6 +252,13 @@ const TreeViewer: React.FC<TreeViewerProps> = ({ data, onNodeClick }) => {
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+  
+  // Sync nodes and edges when data changes
+  useEffect(() => {
+    console.log('🔄 TreeViewer: Syncing nodes and edges with new data');
+    setNodes(initialNodes);
+    setEdges(initialEdges);
+  }, [initialNodes, initialEdges, setNodes, setEdges]);
 
   const onConnect = useCallback(
     (params: Connection) => setEdges((eds) => addEdge(params, eds)),
@@ -241,23 +303,25 @@ const TreeViewer: React.FC<TreeViewerProps> = ({ data, onNodeClick }) => {
           nodeColor={(node) => {
             const nodeName = node.data?.name || '';
             const status = node.data?.status || 'pending';
+            const nameLower = nodeName.toLowerCase();
             
-            // Use the exact same logic as the main tree visualization
-            // Check if this is a synthesis analysis node
-            if (nodeName.toLowerCase().includes('synthesis analysis')) {
+            // Use the same logic as the main tree visualization with logo colors
+            // Synthesis Analysis nodes (lightest logo color)
+            if (nameLower.includes('synthesis') || nameLower.includes('deep analysis')) {
               switch (status) {
-                case 'completed': return '#fdba74'; // orange-300
-                case 'in_progress': return '#fb923c'; // orange-400
+                case 'completed': return '#bae6fd'; // sky-200
+                case 'in_progress': return '#7dd3fc'; // sky-300
                 case 'failed': return '#ef4444';
-                case 'pending': return '#fed7aa'; // orange-200
-                default: return '#fed7aa';
+                case 'pending': return '#e0f2fe'; // sky-100
+                default: return '#e0f2fe';
               }
             }
             
-            // Check if this is a task node (contains "task" or other task indicators)
-            if (nodeName.toLowerCase().includes('task') || 
-                nodeName.toLowerCase().includes('evidence') ||
-                nodeName.toLowerCase().includes('investigation')) {
+            // Evidence nodes (light logo color)
+            if (nameLower.includes('evidence') || nameLower.includes('fingerprint') || 
+                nameLower.includes('fabric') || nameLower.includes('blood') || 
+                nameLower.includes('footprint') || nameLower.includes('weapon') ||
+                nameLower.includes('paperweight') || nameLower.includes('crystal')) {
               switch (status) {
                 case 'completed': return '#7dd3fc'; // sky-300
                 case 'in_progress': return '#38bdf8'; // sky-400
@@ -267,13 +331,65 @@ const TreeViewer: React.FC<TreeViewerProps> = ({ data, onNodeClick }) => {
               }
             }
             
-            // Default colors for other node types
+            // Witness/People nodes (medium logo color)
+            if (nameLower.includes('witness') || nameLower.includes('robert') || 
+                nameLower.includes('margaret') || nameLower.includes('elena') ||
+                nameLower.includes('thomas') || nameLower.includes('blackwood') ||
+                nameLower.includes('hartwell') || nameLower.includes('rodriguez')) {
+              switch (status) {
+                case 'completed': return '#38bdf8'; // sky-400
+                case 'in_progress': return '#0ea5e9'; // sky-500
+                case 'failed': return '#ef4444';
+                case 'pending': return '#7dd3fc'; // sky-300
+                default: return '#7dd3fc';
+              }
+            }
+            
+            // Motive/Analysis nodes (medium-dark logo color)
+            if (nameLower.includes('motive') || nameLower.includes('alibi') ||
+                nameLower.includes('timeline') || nameLower.includes('background') ||
+                nameLower.includes('relationship') || nameLower.includes('inheritance')) {
+              switch (status) {
+                case 'completed': return '#0ea5e9'; // sky-500
+                case 'in_progress': return '#0284c7'; // sky-600
+                case 'failed': return '#ef4444';
+                case 'pending': return '#38bdf8'; // sky-400
+                default: return '#38bdf8';
+              }
+            }
+            
+            // Scene/Location nodes (cyan variant)
+            if (nameLower.includes('scene') || nameLower.includes('window') ||
+                nameLower.includes('library') || nameLower.includes('manor') ||
+                nameLower.includes('location') || nameLower.includes('entry')) {
+              switch (status) {
+                case 'completed': return '#67e8f9'; // cyan-300
+                case 'in_progress': return '#22d3ee'; // cyan-400
+                case 'failed': return '#ef4444';
+                case 'pending': return '#a5f3fc'; // cyan-200
+                default: return '#a5f3fc';
+              }
+            }
+            
+            // Investigation/Task nodes (dark logo color)
+            if (nameLower.includes('investigation') || nameLower.includes('task') ||
+                nameLower.includes('analyze') || nameLower.includes('examine')) {
+              switch (status) {
+                case 'completed': return '#0284c7'; // sky-600
+                case 'in_progress': return '#0369a1'; // sky-700
+                case 'failed': return '#ef4444';
+                case 'pending': return '#0ea5e9'; // sky-500
+                default: return '#0ea5e9';
+              }
+            }
+            
+            // Default colors (medium logo color)
             switch (status) {
-              case 'completed': return '#3b82f6';
-              case 'in_progress': return '#2563eb';
+              case 'completed': return '#0ea5e9'; // sky-500
+              case 'in_progress': return '#0284c7'; // sky-600
               case 'failed': return '#ef4444';
-              case 'pending': return '#6b7280';
-              default: return '#6b7280';
+              case 'pending': return '#38bdf8'; // sky-400
+              default: return '#38bdf8';
             }
           }}
         />

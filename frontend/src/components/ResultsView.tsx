@@ -1,17 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import { useAppContext } from '../contexts/AppContext';
-import type { CompletedJob } from '../contexts/AppContext';
+import type { Job } from '../contexts/AppContext';
 
 const ResultsView: React.FC = () => {
-  const { jobStatus, currentJobName, setJobSummary, jobSummary, jobHistory, setJobHistory, setJobStatus } = useAppContext();
-  const [loading, setLoading] = useState(false);
-  const [selectedJob, setSelectedJob] = useState<CompletedJob | null>(null);
+  const { jobStatus, currentJobName, setJobSummary, jobHistory, setJobHistory, setJobStatus } = useAppContext();
+  const [loading] = useState(false);
+  const [selectedJob, setSelectedJob] = useState<Job | null>(null);
   const [currentTreeStats, setCurrentTreeStats] = useState<any>(null);
+  const [expandedEvidence, setExpandedEvidence] = useState<Set<string>>(new Set());
+  const [expandedFindings, setExpandedFindings] = useState<Set<number>>(new Set());
   const API_BASE = 'http://localhost:8000';
 
   // Poll for job completion when running
   useEffect(() => {
-    let jobAddedToHistory = false; // Flag to prevent duplicate job creation
+    let jobAddedToHistory = false;
     
     if (jobStatus.status === 'running') {
       const pollInterval = setInterval(async () => {
@@ -24,16 +26,19 @@ const ResultsView: React.FC = () => {
             if (data.summary && !jobAddedToHistory) {
               setJobSummary(data.summary);
               
-              // Add completed job to history
-              const completedJob: CompletedJob = {
-                id: Math.random().toString(36).substring(7),
-                name: currentJobName || 'Untitled Job',
-                completedAt: new Date().toISOString(),
-                summary: data.summary,
-                status: 'completed' as const
-              };
+              // Update existing running job to completed status
+              setJobHistory(prev => prev.map(job => {
+                if (job.status === 'running' && job.name === currentJobName) {
+                  return {
+                    ...job,
+                    status: 'completed' as const,
+                    completedAt: new Date().toISOString(),
+                    summary: data.summary
+                  };
+                }
+                return job;
+              }));
               
-              setJobHistory(prev => [completedJob, ...prev]);
               setJobStatus({ status: 'completed', message: 'Job completed successfully!' });
               jobAddedToHistory = true; // Mark as added
               clearInterval(pollInterval);
@@ -72,7 +77,7 @@ const ResultsView: React.FC = () => {
     if (jobStatus.status === 'completed' && jobHistory.length > 0) {
       const latestJob = jobHistory[0];
       setSelectedJob(latestJob); // Show the most recent completed job
-      setJobSummary(latestJob.summary); // Load the summary automatically
+      setJobSummary(latestJob.summary || null); // Load the summary automatically
     }
   }, [jobStatus.status, jobHistory, setJobSummary]);
 
@@ -87,9 +92,11 @@ const ResultsView: React.FC = () => {
     });
   };
 
-  const handleJobClick = (job: CompletedJob) => {
+  const handleJobClick = (job: Job) => {
     setSelectedJob(job);
-    setJobSummary(job.summary);
+    setJobSummary(job.summary || null);
+    setExpandedEvidence(new Set()); // Reset expanded state when switching jobs
+    setExpandedFindings(new Set()); // Reset findings expanded state when switching jobs
   };
 
   const handleBackToList = () => {
@@ -107,6 +114,74 @@ const ResultsView: React.FC = () => {
     if (selectedJob && selectedJob.id === jobId) {
       setSelectedJob(null);
     }
+  };
+
+  const toggleEvidence = (evidenceId: string) => {
+    setExpandedEvidence(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(evidenceId)) {
+        newSet.delete(evidenceId);
+      } else {
+        newSet.add(evidenceId);
+      }
+      return newSet;
+    });
+  };
+
+  const toggleFinding = (findingIndex: number) => {
+    setExpandedFindings(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(findingIndex)) {
+        newSet.delete(findingIndex);
+      } else {
+        newSet.add(findingIndex);
+      }
+      return newSet;
+    });
+  };
+
+  // Function to extract evidence tags from finding text
+  const getEvidenceTagsForFinding = (finding: any, evidenceList: any[]) => {
+    const tags: string[] = [];
+    const searchText = (finding.description || finding.title || '').toLowerCase();
+    
+    evidenceList.forEach((evidence: any) => {
+      // Extract meaningful keywords from evidence titles
+      const evidenceTitle = evidence.title.toLowerCase();
+      const meaningfulKeywords = extractMeaningfulKeywords(evidenceTitle);
+      
+      // Check if any meaningful keyword appears in the finding
+      if (meaningfulKeywords.some((keyword: string) => searchText.includes(keyword))) {
+        tags.push(evidence.title);
+      }
+    });
+    return tags.slice(0, 3); // Limit to 3 tags max
+  };
+
+  // Function to extract meaningful keywords from evidence names
+  const extractMeaningfulKeywords = (text: string): string[] => {
+    const words = text.split(' ');
+    const meaningfulWords: string[] = [];
+    
+    // Filter out common words and keep important terms
+    const skipWords = ['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'evidence', 'analysis'];
+    
+    words.forEach(word => {
+      const cleanWord = word.replace(/[^a-zA-Z]/g, '').toLowerCase();
+      if (cleanWord.length > 2 && !skipWords.includes(cleanWord)) {
+        meaningfulWords.push(cleanWord);
+      }
+    });
+    
+    // Add compound keywords for better matching
+    if (text.includes('fingerprint')) meaningfulWords.push('print', 'finger');
+    if (text.includes('paperweight')) meaningfulWords.push('weapon', 'crystal');
+    if (text.includes('fabric')) meaningfulWords.push('cloth', 'material', 'textile');
+    if (text.includes('footprint')) meaningfulWords.push('foot', 'shoe', 'track');
+    if (text.includes('window')) meaningfulWords.push('entry', 'break');
+    if (text.includes('blood')) meaningfulWords.push('dna', 'biological');
+    
+    return [...new Set(meaningfulWords)]; // Remove duplicates
   };
 
   if (loading) {
@@ -136,7 +211,9 @@ const ResultsView: React.FC = () => {
               </button>
               <div>
                 <h2 className="text-2xl font-bold text-gray-800">{selectedJob.name}</h2>
-                <p className="text-gray-600">Completed {formatDate(selectedJob.completedAt)}</p>
+                <p className="text-gray-600">
+                  {selectedJob.completedAt ? `Completed ${formatDate(selectedJob.completedAt)}` : 'In Progress'}
+                </p>
               </div>
             </div>
 
@@ -226,13 +303,55 @@ const ResultsView: React.FC = () => {
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                       </svg>
                       <h3 className="text-xl font-bold text-gray-800">Key Findings</h3>
+                      <span className="text-sm text-gray-500">({selectedJob.summary.key_findings.length} items)</span>
                     </div>
-                    <div className="space-y-3">
-                      {selectedJob.summary.key_findings.map((finding, index) => (
-                        <div key={index} className="p-4 bg-gray-50 rounded-lg">
-                          <p className="text-gray-700">{finding}</p>
-                        </div>
-                      ))}
+                                        <div className="space-y-2">
+                      {selectedJob.summary.key_findings.map((finding, index) => {
+                        const isExpanded = expandedFindings.has(index);
+                        const evidenceTags = getEvidenceTagsForFinding(finding, selectedJob.summary?.evidence_summary || []);
+                        
+                        return (
+                          <div key={index} className="border border-gray-200 rounded-lg overflow-hidden">
+                            <button
+                              onClick={() => toggleFinding(index)}
+                              className="w-full p-4 text-left"
+                              style={{ 
+                                backgroundColor: '#7ECEF4',
+                                color: '#19283B'
+                              }}
+                            >
+                              <div className="flex items-start justify-between">
+                                <div className="flex-1">
+                                  <h4 className="font-semibold text-lg mb-2">{finding.title}</h4>
+                                  <div className="flex flex-wrap gap-1">
+                                    {evidenceTags.map((tag, tagIndex) => (
+                                      <span key={tagIndex} className="px-2 py-1 bg-white bg-opacity-80 text-xs rounded border border-gray-400 text-gray-800 font-medium shadow-sm">
+                                        🔗 {tag.length > 20 ? tag.substring(0, 20) + '...' : tag}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                                <div className="flex items-center space-x-2 ml-4 flex-shrink-0">
+                                  <span className="text-xs text-gray-600 font-medium">
+                                    {finding.source_type}
+                                  </span>
+                                  <svg 
+                                    className={`w-5 h-5 text-gray-600 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`}
+                                    fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                                  >
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                  </svg>
+                                </div>
+                              </div>
+                            </button>
+                            {isExpanded && (
+                              <div className="p-4 bg-white" style={{ borderTopColor: '#7ECEF4', borderTopWidth: '1px' }}>
+                                <p className="text-gray-700 text-sm leading-relaxed whitespace-pre-wrap">{finding.description}</p>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -245,14 +364,44 @@ const ResultsView: React.FC = () => {
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
                       </svg>
                       <h3 className="text-xl font-bold text-gray-800">Evidence Summary</h3>
+                      <span className="text-sm text-gray-500">({selectedJob.summary.evidence_summary.length} items)</span>
                     </div>
-                    <div className="space-y-3">
-                      {selectedJob.summary.evidence_summary.map((evidence, index) => (
-                        <div key={index} className="p-4 bg-yellow-50 border-l-4 border-yellow-400 rounded-r-lg">
-                          <h4 className="font-semibold text-yellow-800 mb-1">{evidence.type}</h4>
-                          <p className="text-yellow-700 text-sm">{evidence.description}</p>
-                        </div>
-                      ))}
+                    <div className="space-y-2">
+                      {selectedJob.summary.evidence_summary.map((evidence) => {
+                        const isExpanded = expandedEvidence.has(evidence.id);
+                        return (
+                          <div key={evidence.id} className="border border-gray-200 rounded-lg overflow-hidden">
+                            <button
+                              onClick={() => toggleEvidence(evidence.id)}
+                              className="w-full p-4 text-left flex items-center justify-between"
+                              style={{ 
+                                backgroundColor: '#56A3B1',
+                                color: 'white'
+                              }}
+                            >
+                              <div className="flex-1">
+                                <h4 className="font-semibold text-white">{evidence.title}</h4>
+                              </div>
+                              <div className="flex items-center space-x-2">
+                                <span className="px-2 py-1 bg-black bg-opacity-20 text-xs rounded text-white font-medium border border-white border-opacity-30">
+                                  {evidence.type}
+                                </span>
+                                <svg 
+                                  className={`w-5 h-5 text-white transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`}
+                                  fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                                >
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                </svg>
+                              </div>
+                            </button>
+                            {isExpanded && (
+                              <div className="p-4 bg-white" style={{ borderTopColor: '#7ECEF4', borderTopWidth: '1px' }}>
+                                <p className="text-gray-700 text-sm leading-relaxed whitespace-pre-wrap">{evidence.description}</p>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -315,7 +464,7 @@ const ResultsView: React.FC = () => {
                           {job.name}
                         </p>
                         <p className="text-sm text-gray-500">
-                          {formatDate(job.completedAt)}
+                          {job.completedAt ? formatDate(job.completedAt) : 'In Progress'}
                         </p>
                       </div>
                     </div>

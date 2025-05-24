@@ -108,26 +108,48 @@ class SummarizationAgent:
             evidence_nodes = tree_data.get("evidence_nodes", [])
             
             for node in evidence_nodes:
-                evidence_type = "Physical Evidence"
-                if "fingerprint" in node["name"].lower():
-                    evidence_type = "Fingerprint Evidence"
-                elif "fabric" in node["name"].lower():
-                    evidence_type = "Fabric Evidence"
-                elif "dna" in node["name"].lower():
-                    evidence_type = "DNA Evidence"
-                elif "weapon" in node["name"].lower():
-                    evidence_type = "Weapon Evidence"
+                # Clean up evidence title and extract type
+                clean_title = node["name"]
+                evidence_type = "Evidence"
+                
+                # Remove common prefixes and extract type
+                if clean_title.startswith("Evidence Analysis:"):
+                    clean_title = clean_title.replace("Evidence Analysis:", "").strip()
+                    evidence_type = "Analysis"
+                
+                # Enhanced evidence type detection
+                title_lower = clean_title.lower()
+                if "fingerprint" in title_lower or "print" in title_lower:
+                    evidence_type = "Fingerprint"
+                elif "fabric" in title_lower or "cloth" in title_lower or "textile" in title_lower:
+                    evidence_type = "Fabric"
+                elif "blood" in title_lower or "dna" in title_lower or "biological" in title_lower:
+                    evidence_type = "Blood"
+                elif "weapon" in title_lower or "paperweight" in title_lower or "crystal" in title_lower:
+                    evidence_type = "Weapon"
+                elif "footprint" in title_lower or "shoe" in title_lower or "foot" in title_lower:
+                    evidence_type = "Footprint"
+                elif "window" in title_lower or "entry" in title_lower or "break" in title_lower:
+                    evidence_type = "Entry Point"
+                elif "statement" in title_lower or "witness" in title_lower or "testimony" in title_lower:
+                    evidence_type = "Witness"
+                elif "location" in title_lower or "scene" in title_lower or "room" in title_lower:
+                    evidence_type = "Location"
+                elif "time" in title_lower or "timeline" in title_lower or "chronology" in title_lower:
+                    evidence_type = "Timeline"
                 
                 evidence_summary.append({
-                    "type": evidence_type,
-                    "description": node["description"][:150] + "..." if len(node["description"]) > 150 else node["description"],
+                    "id": node["id"],  # Add unique ID for frontend interaction
+                    "title": clean_title,  # Cleaned evidence name
+                    "type": evidence_type,  # Evidence type for tagging
+                    "description": node["description"],  # Full description (frontend will handle display)
                     "status": node["status"]
                 })
                 
         except Exception as e:
             logger.error(f"[{self.agent_name}] Error analyzing evidence: {e}")
             
-        return evidence_summary[:5]  # Return top 5 evidence items
+        return evidence_summary  # Return all evidence items
     
     def _analyze_suspects_and_motives(self) -> List[Dict[str, str]]:
         """Analyze suspects, motives, and relationships"""
@@ -360,29 +382,142 @@ Write as a confident investigative conclusion based on ALL the evidence provided
             logger.error(f"[{self.agent_name}] Error building metrics: {e}")
             return {"total_nodes_created": 0, "analysis_depth": 0, "tasks_completed": 0, "tasks_failed": 0}
     
-    def _extract_key_findings(self, tree_data: Dict) -> List[str]:
-        """Extract key findings from tree analysis"""
+    def _extract_key_findings(self, tree_data: Dict) -> List[Dict[str, str]]:
+        """Extract key findings from tree analysis with clean titles"""
         findings = []
         
         try:
-            # Extract findings from analysis nodes
+            # Generate findings from analysis nodes with clean titles
             analysis_nodes = tree_data.get("analysis_nodes", [])
             for node in analysis_nodes[:3]:  # Top 3 analysis nodes
-                if len(node["description"]) > 50:
-                    findings.append(node["description"][:200] + "...")
-                else:
-                    findings.append(node["description"])
+                # Generate a clean title from the node name
+                clean_title = self._generate_clean_title(node["name"], "analysis")
+                findings.append({
+                    "title": clean_title,
+                    "description": node["description"],
+                    "source_type": "analysis"
+                })
             
-            # Add evidence-based findings
+            # Add evidence-based findings with clean titles
             evidence_nodes = tree_data.get("evidence_nodes", [])
             for node in evidence_nodes[:2]:  # Top 2 evidence findings
-                finding = f"Evidence Analysis: {node['description'][:150]}..."
-                findings.append(finding)
+                clean_title = self._generate_clean_title(node["name"], "evidence")
+                findings.append({
+                    "title": clean_title,
+                    "description": node["description"],
+                    "source_type": "evidence"
+                })
                 
         except Exception as e:
             logger.error(f"[{self.agent_name}] Error extracting findings: {e}")
             
         return findings[:5]  # Max 5 findings
+    
+    def _generate_clean_title(self, raw_name: str, finding_type: str) -> str:
+        """Generate clean, professional titles for findings"""
+        clean_title = raw_name
+        
+        # Remove common prefixes
+        prefixes_to_remove = [
+            "Evidence Analysis:", "Analysis:", "Investigation:",
+            "Synthesis Analysis #", "Deep Analysis Phase", 
+            "Task #", "Node #"
+        ]
+        
+        for prefix in prefixes_to_remove:
+            if clean_title.startswith(prefix):
+                clean_title = clean_title.replace(prefix, "").strip()
+        
+        # Extract key information from the title for more specific naming
+        title_lower = clean_title.lower()
+        
+        # Generate highly descriptive titles based on content and context
+        if finding_type == "analysis":
+            # Suspect-related analysis
+            if "robert" in title_lower and "blackwood" in title_lower:
+                if "motive" in title_lower or "will" in title_lower:
+                    clean_title = "Robert Blackwood Inheritance Motive Analysis"
+                elif "timeline" in title_lower or "discrepancies" in title_lower:
+                    clean_title = "Robert Blackwood Timeline Inconsistencies"
+                elif "window" in title_lower:
+                    clean_title = "Robert Blackwood's Window Observation"
+                else:
+                    clean_title = "Robert Blackwood Suspect Analysis"
+            elif "thomas" in title_lower and "hartwell" in title_lower:
+                clean_title = "Thomas Hartwell Suspect Investigation"
+            elif "margaret" in title_lower and "blackwood" in title_lower:
+                clean_title = "Margaret Blackwood Witness Analysis"
+            elif "elena" in title_lower and "rodriguez" in title_lower:
+                clean_title = "Elena Rodriguez Housekeeper Analysis"
+            
+            # Evidence-specific analysis
+            elif "paperweight" in title_lower or ("crystal" in title_lower and "weapon" in title_lower):
+                clean_title = "Crystal Paperweight Murder Weapon Analysis"
+            elif "fingerprint" in title_lower:
+                if "desk" in title_lower:
+                    clean_title = "Desk Surface Fingerprint Analysis"
+                elif "unidentified" in title_lower or "unknown" in title_lower:
+                    clean_title = "Unidentified Fingerprint Investigation"
+                else:
+                    clean_title = "Fingerprint Evidence Analysis"
+            elif "fabric" in title_lower or "textile" in title_lower:
+                if "torn" in title_lower or "fragment" in title_lower:
+                    clean_title = "Torn Fabric Fragment Analysis"
+                else:
+                    clean_title = "Fabric Evidence Investigation"
+            elif "footprint" in title_lower or "muddy" in title_lower:
+                clean_title = "Crime Scene Footprint Analysis"
+            elif "window" in title_lower and "entry" in title_lower:
+                clean_title = "Library Window Entry Point Investigation"
+            elif "blood" in title_lower:
+                clean_title = "Blood Evidence Analysis"
+            
+            # General analysis types
+            elif "motive" in title_lower:
+                clean_title = "Suspect Motive Investigation"
+            elif "timeline" in title_lower or "chronology" in title_lower:
+                clean_title = "Crime Timeline Reconstruction"
+            elif "witness" in title_lower:
+                clean_title = "Witness Statement Analysis"
+            elif "scene" in title_lower:
+                clean_title = "Crime Scene Investigation"
+            elif "background" in title_lower:
+                clean_title = "Suspect Background Investigation"
+            elif "alibi" in title_lower:
+                clean_title = "Alibi Verification Analysis"
+            
+        elif finding_type == "evidence":
+            # More specific evidence titles
+            if "fingerprint" in title_lower:
+                if "crystal" in title_lower or "paperweight" in title_lower:
+                    clean_title = "Paperweight Fingerprint Evidence"
+                elif "desk" in title_lower:
+                    clean_title = "Desk Surface Fingerprint Evidence"
+                elif "unidentified" in title_lower:
+                    clean_title = "Unidentified Fingerprint Evidence"
+                else:
+                    clean_title = "Fingerprint Evidence"
+            elif "fabric" in title_lower:
+                clean_title = "Fabric Fragment Evidence"
+            elif "blood" in title_lower:
+                clean_title = "Blood Spatter Evidence"
+            elif "footprint" in title_lower:
+                clean_title = "Muddy Footprint Evidence"
+            elif "weapon" in title_lower or "paperweight" in title_lower:
+                clean_title = "Murder Weapon Evidence"
+        
+        # Fallback: clean up the original name
+        if not clean_title or len(clean_title) < 5 or clean_title == raw_name:
+            # Try to extract meaningful parts from the original name
+            clean_title = raw_name.replace(":", "").replace("#", "").strip()
+            
+            # If it's still generic, make it more descriptive
+            if clean_title.lower().startswith("synthesis analysis"):
+                clean_title = "Investigation Analysis Summary"
+            elif len(clean_title) > 50:
+                clean_title = clean_title[:50] + "..."
+        
+        return clean_title
     
     def _calculate_confidence_score(self) -> float:
         """Calculate investigation confidence score"""

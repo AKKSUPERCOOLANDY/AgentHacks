@@ -10,6 +10,7 @@ import time
 from tree import MemoryTree, MemoryNode, NodeStatus
 from tasklist import TaskQueue, Task, TaskPriority, TaskStatus
 from gemini_client import GeminiClient
+from agentview import AgentViewController, AgentAccessLevel, NodeSummary, MemoryCluster
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -35,12 +36,14 @@ class ExecutionResult:
 class BaseAgent:
     """Base class for all AI agents"""
     
-    def __init__(self, agent_name: str, client: GeminiClient, memory_tree: MemoryTree):
+    def __init__(self, agent_name: str, client: GeminiClient, memory_tree: MemoryTree, view_controller: AgentViewController = None):
         self.agent_name = agent_name
         self.client = client
         self.memory_tree = memory_tree
+        self.view_controller = view_controller
         self.context_bank: Dict[str, str] = {}
         self.execution_history: List[Dict] = []
+        self.agent_id = f"{agent_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         
     def _log_execution(self, action: str, details: Dict[str, Any]):
         """Log agent execution for monitoring"""
@@ -53,16 +56,97 @@ class BaseAgent:
         self.execution_history.append(log_entry)
         logger.info(f"[{self.agent_name.upper()}] {action}: {details}")
     
-    def _build_context(self) -> str:
-        """Build context from context bank"""
-        if not self.context_bank:
-            return "No additional context available."
+    def _build_context(self, query_context: str = None) -> str:
+        """Build context using agent view controller"""
+        if not self.view_controller:
+            # Fallback to original context building
+            if not self.context_bank:
+                return "No additional context available."
+            
+            context_parts = []
+            for key, value in self.context_bank.items():
+                context_parts.append(f"{key}: {value}")
+            
+            return "\n".join(context_parts)
+        
+        # Use view controller to get agent-specific view
+        agent_view = self.view_controller.get_agent_view(
+            agent_id=self.agent_id,
+            agent_type=self._get_access_level(),
+            query_context=query_context
+        )
         
         context_parts = []
-        for key, value in self.context_bank.items():
-            context_parts.append(f"{key}: {value}")
+        
+        # Add file access info
+        if agent_view.get("available_files"):
+            context_parts.append("AVAILABLE FILES:")
+            for file_info in agent_view["available_files"]:
+                access_level = file_info["access_level"]
+                if access_level == "read_only":
+                    context_parts.append(f"  • {file_info['filename']}: {file_info['description']} [Full Access]")
+                else:
+                    context_parts.append(f"  • {file_info['filename']}: {file_info['description']} [Metadata Only]")
+        
+        # Add memory navigation info
+        memory_nav = agent_view.get("memory_navigation", {})
+        if memory_nav.get("node_summaries"):
+            context_parts.append(f"\nMEMORY OVERVIEW ({memory_nav['total_nodes']} total nodes):")
+            
+            # Show clusters
+            if memory_nav.get("memory_clusters"):
+                context_parts.append("Evidence Clusters:")
+                for cluster in memory_nav["memory_clusters"][:3]:  # Top 3 clusters
+                    contradiction_info = f" [⚠️ {len(cluster.contradiction_flags)} contradictions]" if cluster.contradiction_flags else ""
+                    unexplored_info = f" [🔍 {cluster.unexplored_count} unexplored]" if cluster.unexplored_count > 0 else ""
+                    context_parts.append(f"  • {cluster.theme}: {cluster.cluster_summary}{contradiction_info}{unexplored_info}")
+            
+            # Show hot spots
+            if memory_nav.get("hot_spots"):
+                context_parts.append("Investigation Hot Spots:")
+                for hot_spot in memory_nav["hot_spots"][:2]:  # Top 2 hot spots
+                    context_parts.append(f"  • {hot_spot['title']} ({hot_spot['connection_count']} connections)")
+            
+            # Show navigation suggestions
+            if memory_nav.get("navigation_suggestions"):
+                context_parts.append("Navigation Suggestions:")
+                for suggestion in memory_nav["navigation_suggestions"][:3]:  # Top 3 suggestions
+                    context_parts.append(f"  • {suggestion}")
+        
+        # Add task access info for relevant agents
+        if agent_view.get("task_access", {}).get("access_level") == "full":
+            queue_stats = agent_view["task_access"]["queue_stats"]
+            context_parts.append(f"\nTASK QUEUE: {queue_stats['pending_tasks']} pending, {queue_stats['completed_tasks']} completed")
         
         return "\n".join(context_parts)
+    
+    def _get_access_level(self) -> AgentAccessLevel:
+        """Get the access level for this agent type"""
+        # Default implementation - subclasses should override
+        return AgentAccessLevel.EXECUTOR
+    
+    def _get_memory_view(self, focus_node_id: str = None, query_context: str = None) -> Dict:
+        """Get memory view through view controller"""
+        if not self.view_controller:
+            return {}
+        
+        return self.view_controller.get_agent_view(
+            agent_id=self.agent_id,
+            agent_type=self._get_access_level(),
+            focus_node_id=focus_node_id,
+            query_context=query_context
+        )
+    
+    def _request_node_content(self, node_id: str) -> Optional[Dict]:
+        """Request full content for a specific node"""
+        if not self.view_controller:
+            return None
+        
+        return self.view_controller.request_node_content(
+            agent_id=self.agent_id,
+            node_id=node_id,
+            agent_type=self._get_access_level()
+        )
     
     def _update_context_bank(self, key: str, value: str):
         """Update the context bank with new information"""
@@ -100,53 +184,45 @@ class BaseAgent:
 class PlannerAgent(BaseAgent):
     """Planner agent for creating and refining investigation plans"""
     
-    def __init__(self, gemini_client: GeminiClient, memory_tree: MemoryTree, task_queue: TaskQueue):
-        super().__init__("PlannerAgent", gemini_client, memory_tree)
+    def __init__(self, gemini_client: GeminiClient, memory_tree: MemoryTree, task_queue: TaskQueue, view_controller: AgentViewController):
+        super().__init__("PlannerAgent", gemini_client, memory_tree, view_controller)
         self.task_queue = task_queue
         self.max_tasks_per_cycle = 2  # Reduced from 3 for more focused analysis
         self.max_total_tasks = 8     # Reduced from 10 for efficiency
         self.synthesis_guidance = None
         self.conclusion_created = False  # Prevent multiple conclusions
         
+    def _get_access_level(self) -> AgentAccessLevel:
+        """Planner agents have PLANNER access level"""
+        return AgentAccessLevel.PLANNER
+        
     async def create_initial_plan(self, investigation_context: str) -> List[Task]:
-        """Create initial investigation plan"""
+        """Create initial investigation plan using view controller context"""
         try:
+            # Get agent view for context
+            agent_context = self._build_context(investigation_context)
+            
             planning_prompt = f"""
             You are the Planner Agent creating an investigation plan for a CASE FILE ANALYSIS simulation.
 
-            AVAILABLE RESOURCES:
-            - 3 case files have been loaded: forensic_report.txt, police_report.txt, witness_statement_robert.txt
-            - Memory tree with extracted information from these files
-            
-            YOU CANNOT ACCESS:
-            - AFIS databases
-            - External witnesses
-            - New forensic tests
-            - Alibis from external sources
-            - Any information outside the 3 case files
+            CURRENT AGENT VIEW:
+            {agent_context}
             
             INVESTIGATION CONTEXT:
             {investigation_context}
             
-            Create analysis tasks that work with the available case file content ONLY.
-            
-            🌳 STRATEGIC TASK CREATION FOR TREE BUILDING:
+            🌳 STRATEGIC TASK CREATION FOR MINDMAP BUILDING:
             - Maximum 5 initial tasks
-            - Create tasks that build LOGICAL HIERARCHY (evidence → analysis → conclusion)
-            - Focus on specific evidence categories (forensic, suspects, timeline, motives)
-            - Each task should build upon or connect to other tasks
-            - Create depth not breadth (detailed analysis vs surface-level)
-            - DO NOT create tasks asking for external information
+            - Create tasks that build LOGICAL HIERARCHY using similarity connections
+            - Focus on specific evidence categories identified in clusters above
+            - Each task should explore or connect to hot spots and unexplored areas
+            - Use navigation suggestions to guide task creation
+            - DO NOT create tasks asking for external information beyond available files
             
-            Example good tasks:
-            - "Analyze timeline inconsistencies between forensic and witness reports"
-            - "Cross-reference fingerprint evidence mentioned in case files"
-            - "Identify motive patterns from the available witness statements"
-            
-            Example BAD tasks:
-            - "Contact AFIS for fingerprint matching"
-            - "Interview additional witnesses"
-            - "Request new forensic analysis"
+            Example good tasks based on your current view:
+            - "Deep dive into [specific cluster] evidence connections"
+            - "Explore contradictions in [specific cluster with flags]"
+            - "Analyze hot spot: [specific hot spot title]"
             
             Respond in JSON format:
             {{
@@ -514,11 +590,15 @@ class PlannerAgent(BaseAgent):
 class ExecutorAgent(BaseAgent):
     """Agent responsible for executing tasks and updating memory"""
     
-    def __init__(self, client: GeminiClient, memory_tree: MemoryTree):
-        super().__init__("ExecutorAgent", client, memory_tree)
+    def __init__(self, client: GeminiClient, memory_tree: MemoryTree, view_controller: AgentViewController):
+        super().__init__("ExecutorAgent", client, memory_tree, view_controller)
+    
+    def _get_access_level(self) -> AgentAccessLevel:
+        """Executor agents have EXECUTOR access level"""
+        return AgentAccessLevel.EXECUTOR
         
     async def execute_task(self, task: Task) -> ExecutionResult:
-        """Execute a specific task with tree context"""
+        """Execute a specific task with similarity-based context"""
         self._log_execution("execute_task", {
             "task_id": task.id,
             "task_description": task.description
@@ -527,7 +607,7 @@ class ExecutorAgent(BaseAgent):
         relevant_context = self._get_relevant_context(task)
         
         prompt = f"""
-        You are the ExecutorAgent building a PROPER INVESTIGATION TREE HIERARCHY.
+        You are the ExecutorAgent building a PROPER INVESTIGATION MINDMAP using similarity connections.
 
         TASK: {task.description}
         Instructions: {task.instructions}
@@ -536,24 +616,24 @@ class ExecutorAgent(BaseAgent):
         INVESTIGATION CONTEXT:
         {relevant_context}
         
-        🌳 AGGRESSIVE DEPTH-FIRST TREE BUILDING:
-        1. **FORCE DEEP HIERARCHY**: NEVER attach to root unless absolutely no other option exists
-        2. **USE EXACT NODE IDs**: When specifying parent_node_id, use the exact ID from the tree context above (first 8 chars work)
-        3. **CREATE DEEP CHAINS**: Evidence → Sub-Evidence → Analysis → Sub-Analysis → Conclusions
-        4. **MANDATORY DEPTH**: Every node MUST extend an existing analysis, never create standalone branches
+        🌳 SIMILARITY-BASED MINDMAP BUILDING:
+        1. **USE SIMILARITY CONNECTIONS**: Connect to nodes with highest similarity scores
+        2. **EXPLORE CLUSTERS**: Deep dive into evidence clusters with unexplored nodes
+        3. **RESOLVE CONTRADICTIONS**: Address contradiction flags in clusters
+        4. **BUILD ON HOT SPOTS**: Extend highly connected nodes with detailed analysis
+        5. **USE EXACT NODE IDs**: When specifying parent_node_id, use exact IDs from context above
         
-        🎯 AGGRESSIVE HIERARCHY STRATEGY:
-        - Evidence nodes → MUST have detailed sub-analysis children (2-3 levels deep)
-        - Suspect nodes → MUST have specific motive/opportunity/timeline children  
-        - Timeline nodes → MUST have granular time-point analysis children
-        - Analysis nodes → MUST have detailed findings, cross-references, or conclusion children
+        🎯 INTELLIGENT NAVIGATION STRATEGY:
+        - Follow navigation suggestions from your agent view
+        - Connect similar evidence types (forensic with forensic, witness with witness)
+        - Build logical chains: Evidence → Analysis → Cross-reference → Conclusion
+        - Create sub-analysis for complex evidence pieces
         
-        📋 DEPTH-FORCING PARENT SELECTION:
-        - ALWAYS look for the DEEPEST relevant node to attach to
-        - If analyzing fingerprints → attach to specific fingerprint analysis node, NOT general evidence
-        - If analyzing motives → attach to specific suspect's motive node, NOT general suspect node
-        - If analyzing timeline → attach to specific time period node, NOT general timeline
-        - CREATE SUB-CATEGORIES: Instead of broad analysis, create specific focused analysis
+        📋 SMART PARENT SELECTION:
+        - Look for similar nodes in the same evidence cluster
+        - Attach to nodes with high similarity scores to your analysis
+        - Prefer nodes with unexplored potential or contradiction flags
+        - Build depth in hot spot areas that need more investigation
         
         Respond ONLY with valid JSON:
         {{
@@ -569,7 +649,7 @@ class ExecutorAgent(BaseAgent):
                 }}
             ],
             "success": true,
-            "tree_building_strategy": "How this connects to existing evidence hierarchy"
+            "mindmap_strategy": "How this connects to existing evidence using similarity"
         }}
         """
         
@@ -611,141 +691,39 @@ class ExecutorAgent(BaseAgent):
             )
     
     def _get_relevant_context(self, task: Task) -> str:
-        """Get relevant memory context for the task"""
-        context_parts = []
+        """Get relevant context using view controller"""
+        if not self.view_controller:
+            return "View controller not available - using fallback context"
         
-        # Add focused case file content based on task
-        task_keywords = task.description.lower().split()
+        # Extract keywords from task for focused context
+        task_keywords = task.description.lower()
         
-        context_parts.append("CASE FILE ANALYSIS TASK - Available Information:")
-        context_parts.append("="*50)
+        # Get agent view with task context
+        agent_context = self._build_context(task_keywords)
         
-        # Add dynamic case facts from actual documents
-        if 'document_analyzer' in self.context_bank:
-            doc_analyzer = self.context_bank['document_analyzer']
-            doc_summary = doc_analyzer.get_document_summary()
-            
-            context_parts.append(f"""
-CASE FILES BEING ANALYZED:
-Total Documents: {doc_summary['total_documents']}
-Document Types: {', '.join(doc_summary['document_types'])}
-Files: {', '.join([doc['filename'] for doc in doc_summary['documents']])}
-            """)
-        else:
-            context_parts.append("No document analyzer available - using generic case analysis approach")
+        context_parts = ["EXECUTOR AGENT - SIMILARITY-BASED CONTEXT:"]
+        context_parts.append("=" * 50)
+        context_parts.append(agent_context)
         
-        # Add DETAILED current memory tree for better context
-        context_parts.append("CURRENT INVESTIGATION TREE STRUCTURE:")
-        context_parts.append("-" * 40)
+        # Get memory navigation focused on task
+        memory_view = self._get_memory_view(query_context=task_keywords)
+        memory_nav = memory_view.get("memory_navigation", {})
         
-        # Get detailed tree view with node IDs for better parent selection
-        tree_nodes = self._get_tree_nodes_for_context()
-        if tree_nodes:
-            context_parts.append(tree_nodes)
-        else:
-            context_parts.append("Empty tree - this will be the first analysis node")
+        # Add focused node summaries if available
+        if memory_nav.get("node_summaries"):
+            context_parts.append("\nRELEVANT NODES FOR TASK:")
+            for i, summary in enumerate(memory_nav["node_summaries"][:10]):  # Top 10 relevant
+                confidence_icon = "🟢" if summary.confidence_level > 0.7 else "🟡" if summary.confidence_level > 0.4 else "🔴"
+                status_icon = "✅" if summary.is_explored else "🔍"
+                context_parts.append(f"{i+1}. {summary.title} (ID: {summary.id[:8]}...)")
+                context_parts.append(f"   {confidence_icon} Confidence: {summary.confidence_level:.2f} | {status_icon} Status: {summary.status}")
+                context_parts.append(f"   Type: {summary.evidence_type} | Connections: {summary.connection_count}")
+                context_parts.append(f"   Summary: {summary.brief_summary}")
+                context_parts.append("")
         
-        context_parts.append("\nREMEMBER: You can ONLY analyze the text above. No external systems available.")
+        context_parts.append("REMEMBER: Use similarity scores and cluster information to make intelligent connections.")
         
         return "\n".join(context_parts)
-    
-    def _get_tree_nodes_for_context(self) -> str:
-        """Get formatted tree structure with node IDs for context"""
-        if not self.memory_tree.nodes:
-            return "No existing nodes"
-        
-        # Get nodes organized by categories for better parent selection
-        evidence_nodes = []
-        suspect_nodes = []
-        timeline_nodes = []
-        other_nodes = []
-        
-        for node_id, node in self.memory_tree.nodes.items():
-            name_lower = node.name.lower()
-            node_info = f"• {node.name} (ID: {node_id[:8]}...)"
-            
-            if any(word in name_lower for word in ['evidence', 'forensic', 'fingerprint', 'weapon', 'fabric']):
-                evidence_nodes.append(node_info)
-            elif any(word in name_lower for word in ['hartwell', 'robert', 'suspect', 'motive']):
-                suspect_nodes.append(node_info)
-            elif any(word in name_lower for word in ['timeline', 'appointment', 'time', 'alibi']):
-                timeline_nodes.append(node_info)
-            else:
-                other_nodes.append(node_info)
-        
-        result_parts = []
-        
-        if evidence_nodes:
-            result_parts.append("EVIDENCE NODES:")
-            result_parts.extend(evidence_nodes[:5])  # Limit to 5
-        
-        if suspect_nodes:
-            result_parts.append("\nSUSPECT/MOTIVE NODES:")
-            result_parts.extend(suspect_nodes[:5])
-        
-        if timeline_nodes:
-            result_parts.append("\nTIMELINE NODES:")
-            result_parts.extend(timeline_nodes[:5])
-        
-        if other_nodes:
-            result_parts.append("\nOTHER ANALYSIS NODES:")
-            result_parts.extend(other_nodes[:3])
-        
-        result_parts.append(f"\nTotal nodes: {len(self.memory_tree.nodes)}")
-        
-        return "\n".join(result_parts)
-    
-    def _extract_relevant_sections(self, content: str, keywords: List[str]) -> List[str]:
-        """Extract relevant sections from document content"""
-        lines = content.split('\n')
-        relevant_sections = []
-        
-        for i, line in enumerate(lines):
-            line_lower = line.lower()
-            # Check if line contains relevant keywords
-            if any(keyword in line_lower for keyword in keywords):
-                # Get context around the relevant line
-                start = max(0, i-1)
-                end = min(len(lines), i+2)
-                section = ' '.join(lines[start:end]).strip()
-                if section and len(section) > 20:
-                    relevant_sections.append(section)
-        
-        # Also look for key evidence markers
-        evidence_markers = ['fingerprint', 'blood', 'weapon', 'time', 'appointment', 'fabric', 'window']
-        for i, line in enumerate(lines):
-            line_lower = line.lower()
-            if any(marker in line_lower for marker in evidence_markers):
-                start = max(0, i-1)
-                end = min(len(lines), i+2)
-                section = ' '.join(lines[start:end]).strip()
-                if section and len(section) > 20 and section not in relevant_sections:
-                    relevant_sections.append(section)
-        
-        return relevant_sections[:5]  # Return top 5 most relevant sections
-    
-    def _get_available_commands(self) -> str:
-        """Return list of tree manipulation commands"""
-        # Get available parent nodes for reference
-        available_nodes = []
-        for node_id, node in self.memory_tree.nodes.items():
-            available_nodes.append(f"- {node.name} (ID: {node_id})")
-        
-        available_nodes_str = "\n".join(available_nodes[:10])  # Show first 10 nodes
-        
-        return f"""
-        Available Memory Commands (SIMULATION ONLY):
-        - Analyze existing nodes and their relationships
-        - Extract patterns from available data
-        - Cross-reference information between nodes
-        - Identify gaps in available information
-        - Create analytical summaries of findings
-        
-        Available Parent Nodes for Memory Updates:
-        {available_nodes_str}
-        
-        Note: When adding nodes, use either the node name or ID as parent_node_id
-        """
     
     def _parse_execution_response(self, execution_data: Dict, task: Task) -> ExecutionResult:
         """Parse execution response into ExecutionResult"""
@@ -967,14 +945,18 @@ Files: {', '.join([doc['filename'] for doc in doc_summary['documents']])}
 class SynthesisAgent(BaseAgent):
     """Synthesis agent for continuous analysis and strategic insights"""
     
-    def __init__(self, gemini_client: GeminiClient, memory_tree: MemoryTree, task_queue: TaskQueue):
-        super().__init__("SynthesisAgent", gemini_client, memory_tree)
+    def __init__(self, gemini_client: GeminiClient, memory_tree: MemoryTree, task_queue: TaskQueue, view_controller: AgentViewController):
+        super().__init__("SynthesisAgent", gemini_client, memory_tree, view_controller)
         self.task_queue = task_queue
         self.analysis_interval = 30  # seconds
         self.last_analysis_time = 0
         self.analysis_count = 0
         self.confidence_threshold = 0.8  # Stop when confidence is high enough
         self.is_running = False
+    
+    def _get_access_level(self) -> AgentAccessLevel:
+        """Synthesis agents have SYNTHESIZER access level"""
+        return AgentAccessLevel.SYNTHESIZER
         
     async def continuous_analysis(self):
         """Run continuous background analysis"""
@@ -996,72 +978,81 @@ class SynthesisAgent(BaseAgent):
                 await asyncio.sleep(10)
     
     async def perform_synthesis(self):
-        """Perform synthesis analysis and provide strategic guidance"""
+        """Perform synthesis analysis using view controller insights"""
         try:
+            # Get comprehensive view using view controller
+            agent_context = self._build_context("synthesis analysis")
+            memory_view = self._get_memory_view(query_context="overall investigation status")
+            
             tree_stats = self.memory_tree.get_tree_statistics()
             queue_stats = self.task_queue.get_queue_statistics()
             
-            # Get recent memory updates
-            recent_nodes = self.memory_tree.get_recent_nodes(limit=8)
+            # Get memory navigation insights
+            memory_nav = memory_view.get("memory_navigation", {})
+            clusters = memory_nav.get("memory_clusters", [])
+            hot_spots = memory_nav.get("hot_spots", [])
+            
             total_tasks = queue_stats['completed_tasks'] + queue_stats['failed_tasks']
             
-            # Enhanced analysis of evidence quality and depth
-            evidence_depth_score = min(tree_stats['max_depth'] / 4.0, 1.0)  # Normalize depth
-            evidence_breadth_score = min(tree_stats['total_nodes'] / 30.0, 1.0)  # Normalize breadth
+            # Calculate cluster-based metrics
+            cluster_completeness = 0
+            contradiction_count = 0
+            unexplored_count = 0
+            
+            for cluster in clusters:
+                if cluster.unexplored_count == 0:
+                    cluster_completeness += 1
+                contradiction_count += len(cluster.contradiction_flags)
+                unexplored_count += cluster.unexplored_count
+            
+            cluster_completion_rate = cluster_completeness / max(len(clusters), 1)
             
             synthesis_prompt = f"""
-            You are the Synthesis Agent conducting ENHANCED strategic analysis with depth focus.
+            You are the Synthesis Agent conducting ENHANCED strategic analysis using similarity-based insights.
             
             CURRENT INVESTIGATION STATE:
-            - Memory tree: {tree_stats['total_nodes']} nodes, depth {tree_stats['max_depth']}
-            - Evidence depth score: {evidence_depth_score:.2f} (higher = deeper analysis)
-            - Evidence breadth score: {evidence_breadth_score:.2f} (higher = more comprehensive)
-            - Tasks: {queue_stats['pending_tasks']} pending, {queue_stats['completed_tasks']} completed
-            - Analysis round: {self.analysis_count}
-            - Total tasks completed: {total_tasks}
+            {agent_context}
             
-            RECENT EVIDENCE DEVELOPMENTS:
-            {self._format_recent_nodes(recent_nodes)}
+            SIMILARITY-BASED ANALYSIS:
+            - Evidence clusters: {len(clusters)} total
+            - Cluster completion rate: {cluster_completion_rate:.2f} ({cluster_completeness}/{len(clusters)} fully explored)
+            - Active contradictions: {contradiction_count} across clusters
+            - Unexplored nodes: {unexplored_count} remaining
+            - Investigation hot spots: {len(hot_spots)} high-connection areas
+            - Total tasks completed: {total_tasks}
+            - Analysis round: {self.analysis_count}
+            
+            CLUSTER-BASED EVIDENCE EVALUATION:
+            {self._format_cluster_analysis(clusters)}
+            
+            HOT SPOT ANALYSIS:
+            {self._format_hotspot_analysis(hot_spots)}
             
             ENHANCED SYNTHESIS FRAMEWORK:
-            - EVIDENCE QUALITY: Assess strength and reliability of evidence chains
-            - LOGICAL CONNECTIONS: Evaluate how well evidence pieces connect
-            - CONFIDENCE CALCULATION: Base confidence on evidence depth, not just quantity
-            - STRATEGIC DIRECTION: Focus on evidence gaps vs. broad exploration
+            - CLUSTER STRENGTH: How well are evidence clusters developed and explored?
+            - CONTRADICTION RESOLUTION: Are contradictions being addressed effectively?  
+            - HOT SPOT DEVELOPMENT: Are high-connection areas being properly analyzed?
+            - SIMILARITY NETWORK: How well connected is the evidence through similarity?
+            - OVERALL CONFIDENCE: Based on cluster completeness and contradiction resolution
             
-            IMPROVED SYNTHESIS ANALYSIS:
-            1. **Evidence Chain Strength** (0.0-1.0): How well connected is the evidence?
-            2. **Logical Consistency** (0.0-1.0): How consistent are the findings?
-            3. **Investigation Confidence Level** (0.0-1.0): Overall case strength
-            4. **Evidence Quality Assessment**: What's the strongest/weakest evidence?
-            5. **Strategic Recommendation**:
-               - CONTINUE: If critical evidence gaps exist and can be filled
-               - CONCLUDE: If evidence forms strong logical chain (confidence > 0.75)
-               - FOCUS: If specific evidence needs deeper analysis
-            6. **Priority Focus**: Most important evidence to strengthen next
-            
-            ENHANCED STOPPING CRITERIA:
-            - Confidence > 0.8 OR Evidence depth score > 0.7: Consider CONCLUDE
-            - Tasks > 8 AND confidence > 0.7: Likely sufficient evidence
-            - Strong evidence chain with logical consistency > 0.8: CONCLUDE
-            - Repetitive tasks without new insights: CONCLUDE
-            
-            CONFIDENCE CALCULATION GUIDANCE:
-            - High confidence: Multiple evidence sources point to same conclusion
-            - Medium confidence: Some evidence supports conclusion, minor gaps remain
-            - Low confidence: Evidence is circumstantial or conflicting
+            STOPPING CRITERIA (Similarity-Based):
+            - All major clusters fully explored (completion rate > 0.8)
+            - Contradictions resolved or acknowledged (< 2 unresolved contradictions)
+            - Hot spots adequately analyzed (all hot spots have sufficient children)
+            - High similarity network connectivity across evidence types
             
             Respond in JSON format:
             {{
-                "evidence_chain_strength": 0.0-1.0,
-                "logical_consistency": 0.0-1.0,
+                "cluster_strength": 0.0-1.0,
+                "contradiction_resolution": 0.0-1.0,
+                "hotspot_development": 0.0-1.0,
+                "similarity_network_strength": 0.0-1.0,
                 "confidence_level": 0.0-1.0,
-                "evidence_quality_assessment": "strongest and weakest evidence summary",
                 "key_patterns": ["concrete pattern1", "concrete pattern2"],
-                "critical_gaps": ["specific gap1", "specific gap2"],
+                "unresolved_contradictions": ["specific contradiction1", "specific contradiction2"],
                 "strategic_recommendation": "CONTINUE|CONCLUDE|FOCUS",
-                "priority_focus": "specific evidence to strengthen",
-                "reasoning": "detailed logical explanation"
+                "priority_focus": "specific area needing attention",
+                "reasoning": "detailed logical explanation based on clusters and similarities"
             }}
             """
             
@@ -1071,33 +1062,38 @@ class SynthesisAgent(BaseAgent):
             if synthesis_result:
                 # Log enhanced synthesis insights
                 confidence = synthesis_result.get('confidence_level', 0)
-                evidence_chain_strength = synthesis_result.get('evidence_chain_strength', 0)
-                logical_consistency = synthesis_result.get('logical_consistency', 0)
+                cluster_strength = synthesis_result.get('cluster_strength', 0)
+                contradiction_resolution = synthesis_result.get('contradiction_resolution', 0)
                 recommendation = synthesis_result.get('strategic_recommendation', 'CONTINUE')
                 
                 logger.info(f"[SYNTHESIS] Confidence: {confidence:.2f}")
-                logger.info(f"[SYNTHESIS] Evidence chain strength: {evidence_chain_strength:.2f}")
-                logger.info(f"[SYNTHESIS] Logical consistency: {logical_consistency:.2f}")
+                logger.info(f"[SYNTHESIS] Cluster strength: {cluster_strength:.2f}")
+                logger.info(f"[SYNTHESIS] Contradiction resolution: {contradiction_resolution:.2f}")
                 logger.info(f"[SYNTHESIS] Recommendation: {recommendation}")
                 logger.info(f"[SYNTHESIS] Priority focus: {synthesis_result.get('priority_focus', 'General investigation')}")
                 
-                # Enhanced confidence adjustment based on multiple factors
+                # Enhanced confidence adjustment based on similarity metrics
                 base_confidence = confidence
                 
-                # Factor 1: Evidence depth and breadth balance
-                if evidence_depth_score > 0.6 and evidence_breadth_score > 0.6:
-                    confidence = min(1.0, confidence + 0.05)
-                    logger.info(f"[SYNTHESIS] 📈 +0.05 confidence for balanced evidence (depth: {evidence_depth_score:.2f}, breadth: {evidence_breadth_score:.2f})")
-                
-                # Factor 2: Strong evidence chains
-                if evidence_chain_strength > 0.75 and logical_consistency > 0.75:
+                # Factor 1: High cluster completion rate
+                if cluster_completion_rate > 0.7:
                     confidence = min(1.0, confidence + 0.1)
-                    logger.info(f"[SYNTHESIS] 📈 +0.10 confidence for strong evidence chains")
+                    logger.info(f"[SYNTHESIS] 📈 +0.10 confidence for high cluster completion ({cluster_completion_rate:.2f})")
                 
-                # Factor 3: Sufficient task completion with good results
-                if total_tasks >= 6 and confidence >= 0.7:
+                # Factor 2: Low contradiction count with good resolution
+                if contradiction_count <= 2 and contradiction_resolution > 0.7:
+                    confidence = min(1.0, confidence + 0.08)
+                    logger.info(f"[SYNTHESIS] 📈 +0.08 confidence for contradiction management")
+                
+                # Factor 3: Well-developed hot spots
+                if len(hot_spots) > 0 and all(h.get('connection_count', 0) >= 3 for h in hot_spots):
                     confidence = min(1.0, confidence + 0.05)
-                    logger.info(f"[SYNTHESIS] 📈 +0.05 confidence for sufficient task completion ({total_tasks} tasks)")
+                    logger.info(f"[SYNTHESIS] 📈 +0.05 confidence for developed hot spots")
+                
+                # Factor 4: Sufficient task completion with good similarity network
+                if total_tasks >= 6 and synthesis_result.get('similarity_network_strength', 0) > 0.7:
+                    confidence = min(1.0, confidence + 0.07)
+                    logger.info(f"[SYNTHESIS] 📈 +0.07 confidence for strong similarity network")
                 
                 # Update synthesis result with adjusted confidence
                 if confidence != base_confidence:
@@ -1108,17 +1104,25 @@ class SynthesisAgent(BaseAgent):
                 synthesis_node = MemoryNode(
                     name=f"Synthesis Analysis #{self.analysis_count}",
                     description=f"Confidence: {confidence:.2f}, "
+                           f"Cluster completion: {cluster_completion_rate:.2f}, "
                            f"Recommendation: {recommendation}, "
                            f"Focus: {synthesis_result.get('priority_focus', 'General')}"
                 )
                 synthesis_node.status = NodeStatus.COMPLETED
                 self.memory_tree.add_node(synthesis_node, self.memory_tree.root_id)
                 
-                # Check if we should stop
-                if confidence >= self.confidence_threshold or recommendation == 'CONCLUDE' or total_tasks >= 25:
+                # Check if we should stop based on similarity metrics
+                should_conclude = (
+                    confidence >= self.confidence_threshold or 
+                    recommendation == 'CONCLUDE' or 
+                    (cluster_completion_rate > 0.8 and contradiction_count <= 1) or
+                    total_tasks >= 25
+                )
+                
+                if should_conclude:
                     # Don't create duplicate conclusions
                     if not self._conclusion_exists_in_tree():
-                        reason = f"Investigation confidence reached {confidence:.2f}" if confidence >= self.confidence_threshold else f"Recommendation: {recommendation}" if recommendation == 'CONCLUDE' else "Maximum task threshold reached"
+                        reason = self._determine_conclusion_reason(confidence, cluster_completion_rate, contradiction_count, recommendation, total_tasks)
                         logger.info(f"[SYNTHESIS] 🎯 {reason} - Recommending conclusion")
                         await self._signal_investigation_complete(synthesis_result)
                     else:
@@ -1130,6 +1134,43 @@ class SynthesisAgent(BaseAgent):
             logger.error(f"[SYNTHESIS] Error in synthesis: {e}")
             return None
     
+    def _format_cluster_analysis(self, clusters: List) -> str:
+        """Format cluster analysis for synthesis prompt"""
+        if not clusters:
+            return "No clusters identified"
+        
+        analysis = []
+        for cluster in clusters:
+            status = "✅ Complete" if cluster.unexplored_count == 0 else f"🔍 {cluster.unexplored_count} unexplored"
+            contradictions = f" | ⚠️ {len(cluster.contradiction_flags)} contradictions" if cluster.contradiction_flags else ""
+            analysis.append(f"- {cluster.theme}: {cluster.cluster_summary} | {status}{contradictions}")
+        
+        return "\n".join(analysis)
+    
+    def _format_hotspot_analysis(self, hot_spots: List) -> str:
+        """Format hot spot analysis for synthesis prompt"""
+        if not hot_spots:
+            return "No hot spots identified"
+        
+        analysis = []
+        for hot_spot in hot_spots:
+            analysis.append(f"- {hot_spot['title']}: {hot_spot['connection_count']} connections ({hot_spot['evidence_type']} type)")
+        
+        return "\n".join(analysis)
+    
+    def _determine_conclusion_reason(self, confidence: float, cluster_rate: float, contradictions: int, recommendation: str, tasks: int) -> str:
+        """Determine the specific reason for concluding investigation"""
+        if confidence >= self.confidence_threshold:
+            return f"High confidence reached ({confidence:.2f})"
+        elif recommendation == 'CONCLUDE':
+            return "AI recommendation to conclude"
+        elif cluster_rate > 0.8 and contradictions <= 1:
+            return f"Evidence clusters well-developed ({cluster_rate:.2f} completion, {contradictions} contradictions)"
+        elif tasks >= 25:
+            return "Maximum task threshold reached"
+        else:
+            return "Investigation completion criteria met"
+
     async def _signal_investigation_complete(self, synthesis_result):
         """Signal that investigation should conclude and force immediate completion"""
         confidence = synthesis_result.get('confidence_level', 0)
@@ -1204,32 +1245,21 @@ class SynthesisAgent(BaseAgent):
             logger.error(f"[SYNTHESIS] Error checking for conclusion: {e}")
             return False
 
-    def _format_recent_nodes(self, recent_nodes):
-        """Format recent nodes for synthesis prompt"""
-        if not recent_nodes:
-            return "No recent updates"
-        
-        formatted = []
-        for node in recent_nodes:
-            content = getattr(node, 'content', '') or getattr(node, 'description', '')
-            formatted.append(f"- {node.name}: {content[:100]}...")
-        
-        return "\n".join(formatted)
-
 
 # Agent Factory and Management
 class AgentSystem:
     """Orchestrates multiple agents working together"""
     
-    def __init__(self, gemini_client: GeminiClient, memory_tree: MemoryTree, task_queue: TaskQueue):
+    def __init__(self, gemini_client: GeminiClient, memory_tree: MemoryTree, task_queue: TaskQueue, view_controller: AgentViewController):
         self.gemini_client = gemini_client
         self.memory_tree = memory_tree
         self.task_queue = task_queue
+        self.view_controller = view_controller
         
         # Initialize agents
-        self.planner = PlannerAgent(gemini_client, memory_tree, task_queue)
-        self.executor = ExecutorAgent(gemini_client, memory_tree)
-        self.synthesis = SynthesisAgent(gemini_client, memory_tree, task_queue)
+        self.planner = PlannerAgent(gemini_client, memory_tree, task_queue, view_controller)
+        self.executor = ExecutorAgent(gemini_client, memory_tree, view_controller)
+        self.synthesis = SynthesisAgent(gemini_client, memory_tree, task_queue, view_controller)
         
         self.is_running = False
         
@@ -1240,7 +1270,7 @@ class AgentSystem:
         # Start synthesis continuous analysis
         synthesis_task = asyncio.create_task(self.synthesis.continuous_analysis())
         
-        logger.info("🤖 Agent system started")
+        logger.info("🤖 Agent system started with view controller integration")
         return synthesis_task
     
     def stop_system(self):
@@ -1250,16 +1280,16 @@ class AgentSystem:
         logger.info("🛑 Agent system stopped")
     
     async def process_query(self, query: str):
-        """Process a query through the agent system"""
+        """Process a query through the agent system with view controller"""
         try:
-            # Create initial plan
+            # Create initial plan using similarity-based context
             initial_tasks = await self.planner.create_initial_plan(query)
             
             # Add tasks to queue
             for task in initial_tasks:
                 self.task_queue.add_task(task)
             
-            logger.info(f"🎯 Created initial plan with {len(initial_tasks)} tasks")
+            logger.info(f"🎯 Created initial plan with {len(initial_tasks)} tasks using similarity navigation")
             
             # Process tasks
             results = []
@@ -1268,7 +1298,7 @@ class AgentSystem:
                 if not next_task:
                     break
                 
-                # Execute task
+                # Execute task with similarity-based context
                 result = await self.executor.execute_task(next_task)
                 results.append(result)
                 
@@ -1276,18 +1306,23 @@ class AgentSystem:
                 if result.success:
                     self.task_queue.mark_completed(next_task.id, result.result)
                     
-                    # Get synthesis guidance
+                    # Get synthesis guidance using view controller insights
                     synthesis_result = await self.synthesis.perform_synthesis()
                     
-                    # Refine plan
+                    # Refine plan using similarity-based recommendations
                     await self.planner.refine_plan(next_task, result.result, synthesis_result)
                 else:
                     self.task_queue.mark_failed(next_task.id, result.result)
             
-            return results
+            return {
+                "tasks_executed": len(results),
+                "successful_tasks": len([r for r in results if r.success]),
+                "view_controller_enabled": True,
+                "similarity_navigation": "active"
+            }
             
         except Exception as e:
-            logger.error(f"Error processing query: {e}")
+            logger.error(f"Error processing query with view controller: {e}")
             return []
 
 
@@ -1297,22 +1332,26 @@ if __name__ == "__main__":
         from gemini_client import GeminiClient
         from tree import MemoryTree, create_detective_case_tree
         from tasklist import TaskQueue
+        from agentview import AgentViewController
         
         # Initialize components
         client = GeminiClient()
         tree = create_detective_case_tree("Test Investigation")
         queue = TaskQueue("db/agent_test.db")
         
-        # Initialize agent system
-        system = AgentSystem(client, tree, queue)
+        # Initialize view controller
+        view_controller = AgentViewController(tree, queue)
+        
+        # Initialize agent system with view controller
+        system = AgentSystem(client, tree, queue, view_controller)
         
         # Start system
         synthesis_task = await system.start_system()
         
         try:
             # Process a test query
-            result = await system.process_query("Investigate the mysterious disappearance of John Doe")
-            print("Query processing result:")
+            result = await system.process_query("Investigate the mysterious disappearance of John Doe using similarity-based navigation")
+            print("Query processing result with view controller:")
             print(json.dumps(result, indent=2, default=str))
             
         finally:
@@ -1321,4 +1360,4 @@ if __name__ == "__main__":
             synthesis_task.cancel()
     
     # Note: This would need to be run in an async context
-    print("Agent system initialized. Use asyncio.run(test_agent_system()) to test.") 
+    print("Agent system with AgentViewController initialized. Use asyncio.run(test_agent_system()) to test.") 
